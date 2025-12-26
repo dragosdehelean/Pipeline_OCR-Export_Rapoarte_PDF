@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "id": "doc_01JHZXJ8Z8P2E7KQ4H0V6B4W5V",
+  "createdAt": "2025-12-26T20:55:12.345Z",
+  "source": {
+    "originalFileName": "Raport_Anual_2024.pdf",
+    "mimeType": "application/pdf",
+    "sizeBytes": 18374291,
+    "sha256": "b3f4b0b0b7b8c5e2b6d9d3e0e0c2a2e3a6a3f3c9b1f0a7c9d2e1f4a0b1c2d3",
+    "storedPath": "data/uploads/doc_01JHZXJ8Z8P2E7KQ4H0V6B4W5V.pdf"
+  },
+  "processing": {
+    "status": "SUCCESS",
+    "startedAt": "2025-12-26T20:55:13.002Z",
+    "finishedAt": "2025-12-26T20:55:41.410Z",
+    "durationMs": 28408,
+    "timeoutSec": 180,
+    "exitCode": 0,
+    "worker": {
+      "pythonBin": ".venv/bin/python",
+      "pythonVersion": "3.12.7",
+      "doclingVersion": "UNKNOWN"
+    }
+  },
+  "outputs": {
+    "markdownPath": "data/exports/doc_01JHZXJ8Z8P2E7KQ4H0V6B4W5V/output.md",
+    "jsonPath": "data/exports/doc_01JHZXJ8Z8P2E7KQ4H0V6B4W5V/output.json",
+    "bytes": {
+      "markdown": 412389,
+      "json": 1820943
+    }
+  },
+  "metrics": {
+    "pages": 148,
+    "textChars": 612844,
+    "mdChars": 590112,
+    "textItems": 4231,
+    "tables": 57,
+    "textCharsPerPageAvg": 4140.837837837838
+  },
+  "qualityGates": {
+    "configVersion": 1,
+    "strict": true,
+    "passed": true,
+    "failedGates": [],
+    "evaluated": [
+      { "code": "DOC_PAGES_GT_0", "passed": true, "actual": 148, "expectedOp": ">", "expected": 0 },
+      { "code": "TEXT_CHARS_MIN", "passed": true, "actual": 612844, "expectedOp": ">=", "expected": 15000 },
+      { "code": "TEXT_CHARS_PER_PAGE_AVG_MIN", "passed": true, "actual": 4140.837837837838, "expectedOp": ">=", "expected": 500 },
+      { "code": "TEXT_ITEMS_MIN", "passed": true, "actual": 4231, "expectedOp": ">=", "expected": 200 },
+      { "code": "MARKDOWN_CHARS_MIN", "passed": true, "actual": 590112, "expectedOp": ">=", "expected": 10000 },
+      { "code": "TABLES_MIN", "passed": true, "actual": 57, "expectedOp": ">=", "expected": 0 }
+    ]
+  },
+  "logs": {
+    "stdoutTail": "",
+    "stderrTail": ""
+  }
+}

@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "id": "doc_01JHZXM3FJ7XKJ8J5X7YQ2G3RM",
+  "createdAt": "2025-12-26T21:02:10.101Z",
+  "source": {
+    "originalFileName": "Raport_scanat_prost.pdf",
+    "mimeType": "application/pdf",
+    "sizeBytes": 9211843,
+    "sha256": "9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0",
+    "storedPath": "data/uploads/doc_01JHZXM3FJ7XKJ8J5X7YQ2G3RM.pdf"
+  },
+  "processing": {
+    "status": "FAILED",
+    "startedAt": "2025-12-26T21:02:10.650Z",
+    "finishedAt": "2025-12-26T21:02:18.009Z",
+    "durationMs": 7359,
+    "timeoutSec": 180,
+    "exitCode": 0,
+    "worker": {
+      "pythonBin": ".venv/bin/python",
+      "pythonVersion": "3.12.7",
+      "doclingVersion": "UNKNOWN"
+    }
+  },
+  "outputs": {
+    "markdownPath": null,
+    "jsonPath": null,
+    "bytes": {
+      "markdown": 0,
+      "json": 0
+    }
+  },
+  "metrics": {
+    "pages": 64,
+    "textChars": 3821,
+    "mdChars": 2900,
+    "textItems": 19,
+    "tables": 0,
+    "textCharsPerPageAvg": 59.703125
+  },
+  "qualityGates": {
+    "configVersion": 1,
+    "strict": true,
+    "passed": false,
+    "failedGates": [
+      {
+        "code": "TEXT_CHARS_MIN",
+        "message": "Prea puțin text extras (textChars sub prag).",
+        "actual": 3821,
+        "expectedOp": ">=",
+        "expected": 15000
+      },
+      {
+        "code": "TEXT_CHARS_PER_PAGE_AVG_MIN",
+        "message": "Densitate prea mică de text (textChars/page mediu sub prag).",
+        "actual": 59.703125,
+        "expectedOp": ">=",
+        "expected": 500
+      },
+      {
+        "code": "TEXT_ITEMS_MIN",
+        "message": "Prea puține blocuri de text detectate (textItems sub prag).",
+        "actual": 19,
+        "expectedOp": ">=",
+        "expected": 200
+      },
+      {
+        "code": "MARKDOWN_CHARS_MIN",
+        "message": "Exportul Markdown e prea mic (mdChars sub prag).",
+        "actual": 2900,
+        "expectedOp": ">=",
+        "expected": 10000
+      }
+    ],
+    "evaluated": [
+      { "code": "DOC_PAGES_GT_0", "passed": true, "actual": 64, "expectedOp": ">", "expected": 0 },
+      { "code": "TEXT_CHARS_MIN", "passed": false, "actual": 3821, "expectedOp": ">=", "expected": 15000 },
+      { "code": "TEXT_CHARS_PER_PAGE_AVG_MIN", "passed": false, "actual": 59.703125, "expectedOp": ">=", "expected": 500 },
+      { "code": "TEXT_ITEMS_MIN", "passed": false, "actual": 19, "expectedOp": ">=", "expected": 200 },
+      { "code": "MARKDOWN_CHARS_MIN", "passed": false, "actual": 2900, "expectedOp": ">=", "expected": 10000 },
+      { "code": "TABLES_MIN", "passed": true, "actual": 0, "expectedOp": ">=", "expected": 0 }
+    ]
+  },
+  "logs": {
+    "stdoutTail": "docling: conversion finished\n",
+    "stderrTail": ""
+  }
+}

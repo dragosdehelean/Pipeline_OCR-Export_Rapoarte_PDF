@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "strict": true,
+  "accept": {
+    "mimeTypes": [
+      "application/pdf",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    ],
+    "extensions": [".pdf", ".docx"]
+  },
+  "limits": {
+    "maxFileSizeMb": 40,
+    "maxPages": 300,
+    "processTimeoutSec": 180,
+    "stdoutTailKb": 64,
+    "stderrTailKb": 64
+  },
+  "quality": {
+    "minTextChars": 15000,
+    "minTextCharsPerPageAvg": 500,
+    "minTextItems": 200,
+    "minMarkdownChars": 10000,
+    "minTables": 0
+  },
+  "gates": [
+    {
+      "code": "DOC_PAGES_GT_0",
+      "enabled": true,
+      "severity": "FAIL",
+      "metric": "pages",
+      "op": ">",
+      "threshold": 0,
+      "message": "Documentul nu are pagini detectabile."
+    },
+    {
+      "code": "TEXT_CHARS_MIN",
+      "enabled": true,
+      "severity": "FAIL",
+      "metric": "textChars",
+      "op": ">=",
+      "threshold": 15000,
+      "message": "Prea puțin text extras (textChars sub prag)."
+    },
+    {
+      "code": "TEXT_CHARS_PER_PAGE_AVG_MIN",
+      "enabled": true,
+      "severity": "FAIL",
+      "metric": "textCharsPerPageAvg",
+      "op": ">=",
+      "threshold": 500,
+      "message": "Densitate prea mică de text (textChars/page mediu sub prag)."
+    },
+    {
+      "code": "TEXT_ITEMS_MIN",
+      "enabled": true,
+      "severity": "FAIL",
+      "metric": "textItems",
+      "op": ">=",
+      "threshold": 200,
+      "message": "Prea puține blocuri de text detectate (textItems sub prag)."
+    },
+    {
+      "code": "MARKDOWN_CHARS_MIN",
+      "enabled": true,
+      "severity": "FAIL",
+      "metric": "mdChars",
+      "op": ">=",
+      "threshold": 10000,
+      "message": "Exportul Markdown e prea mic (mdChars sub prag)."
+    },
+    {
+      "code": "TABLES_MIN",
+      "enabled": true,
+      "severity": "FAIL",
+      "metric": "tables",
+      "op": ">=",
+      "threshold": 0,
+      "message": "Număr insuficient de tabele detectate."
+    }
+  ]
+}
