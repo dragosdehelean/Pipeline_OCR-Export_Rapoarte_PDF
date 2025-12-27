@@ -9,17 +9,17 @@
     "extensions": [".pdf", ".docx"]
   },
   "limits": {
-    "maxFileSizeMb": 40,
-    "maxPages": 300,
-    "processTimeoutSec": 180,
+    "maxFileSizeMb": 150,
+    "maxPages": 500,
+    "processTimeoutSec": 300,
     "stdoutTailKb": 64,
     "stderrTailKb": 64
   },
   "quality": {
-    "minTextChars": 15000,
-    "minTextCharsPerPageAvg": 500,
-    "minTextItems": 200,
-    "minMarkdownChars": 10000,
+    "minTextChars": 200,
+    "minTextCharsPerPageAvg": 50,
+    "minTextItems": 3,
+    "minMarkdownChars": 50,
     "minTables": 0
   },
   "gates": [
@@ -32,14 +32,15 @@
       "threshold": 0,
       "message": "Documentul nu are pagini detectabile."
     },
+
     {
       "code": "TEXT_CHARS_MIN",
       "enabled": true,
       "severity": "FAIL",
       "metric": "textChars",
       "op": ">=",
-      "threshold": 15000,
-      "message": "Prea puțin text extras (textChars sub prag)."
+      "threshold": 200,
+      "message": "Prea puțin text extras (probabil PDF scanat / fără layer de text)."
     },
     {
       "code": "TEXT_CHARS_PER_PAGE_AVG_MIN",
@@ -47,8 +48,8 @@
       "severity": "FAIL",
       "metric": "textCharsPerPageAvg",
       "op": ">=",
-      "threshold": 500,
-      "message": "Densitate prea mică de text (textChars/page mediu sub prag)."
+      "threshold": 50,
+      "message": "Densitate extrem de mică de text (probabil scan fără OCR)."
     },
     {
       "code": "TEXT_ITEMS_MIN",
@@ -56,8 +57,8 @@
       "severity": "FAIL",
       "metric": "textItems",
       "op": ">=",
-      "threshold": 200,
-      "message": "Prea puține blocuri de text detectate (textItems sub prag)."
+      "threshold": 3,
+      "message": "Prea puține blocuri de text detectate (extragere aproape goală)."
     },
     {
       "code": "MARKDOWN_CHARS_MIN",
@@ -65,17 +66,46 @@
       "severity": "FAIL",
       "metric": "mdChars",
       "op": ">=",
-      "threshold": 10000,
-      "message": "Exportul Markdown e prea mic (mdChars sub prag)."
+      "threshold": 50,
+      "message": "Exportul Markdown e aproape gol (posibil bug de export sau parsing eșuat)."
+    },
+
+    {
+      "code": "TEXT_CHARS_PER_PAGE_AVG_WARN",
+      "enabled": true,
+      "severity": "WARN",
+      "metric": "textCharsPerPageAvg",
+      "op": ">=",
+      "threshold": 250,
+      "message": "Text rar per pagină; posibil layout dificil sau scan parțial. Verifică output-ul."
     },
     {
-      "code": "TABLES_MIN",
+      "code": "TEXT_ITEMS_WARN",
       "enabled": true,
-      "severity": "FAIL",
+      "severity": "WARN",
+      "metric": "textItems",
+      "op": ">=",
+      "threshold": 20,
+      "message": "Puține blocuri de text; structurarea poate fi slabă. Verifică output-ul."
+    },
+    {
+      "code": "MARKDOWN_CHARS_WARN",
+      "enabled": true,
+      "severity": "WARN",
+      "metric": "mdChars",
+      "op": ">=",
+      "threshold": 500,
+      "message": "Markdown mic; posibil document scurt sau parsing care a pierdut structură."
+    },
+
+    {
+      "code": "TABLES_MIN",
+      "enabled": false,
+      "severity": "WARN",
       "metric": "tables",
       "op": ">=",
-      "threshold": 0,
-      "message": "Număr insuficient de tabele detectate."
+      "threshold": 1,
+      "message": "Nu s-au detectat tabele. (Dezactivat implicit; multe documente valide nu au tabele.)"
     }
   ]
 }

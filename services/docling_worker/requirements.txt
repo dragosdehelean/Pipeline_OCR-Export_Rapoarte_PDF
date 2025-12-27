@@ -1,0 +1,4 @@
+docling
+pytest
+pytest-cov
+reportlab
