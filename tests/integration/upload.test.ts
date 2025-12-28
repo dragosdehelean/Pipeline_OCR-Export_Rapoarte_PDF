@@ -43,7 +43,7 @@ describe("docs api integration", () => {
 
   it("uploads a good document and lists it", async () => {
     const formData = new FormData();
-    const blob = new Blob(["good fixture content"], { type: "application/pdf" });
+    const blob = new Blob(["BT (Hello) Tj ET"], { type: "application/pdf" });
     formData.append("file", blob, "good.pdf");
 
     const request = new Request("http://localhost/api/docs/upload", {

@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 
@@ -101,11 +102,13 @@ def main() -> int:
             content_text = handle.read().decode("utf-8", errors="ignore").lower()
     except OSError:
         content_text = ""
+    has_text_ops = bool(re.search(r"\btj\b", content_text))
     is_bad = (
         "bad" in file_name
         or "scan" in file_name
         or "bad" in content_text
         or "scan" in content_text
+        or not has_text_ops
     )
     default_metrics = {
         "pages": 0,
@@ -119,9 +122,24 @@ def main() -> int:
     if is_bad:
         metrics = build_pass_metrics(config)
         fail_gate = next(
-            (gate for gate in config.get("gates", []) if gate.get("enabled") and gate.get("severity") == "FAIL"),
+            (
+                gate
+                for gate in config.get("gates", [])
+                if gate.get("enabled")
+                and gate.get("severity") == "FAIL"
+                and gate.get("metric") == "textChars"
+            ),
             None,
         )
+        if not fail_gate:
+            fail_gate = next(
+                (
+                    gate
+                    for gate in config.get("gates", [])
+                    if gate.get("enabled") and gate.get("severity") == "FAIL"
+                ),
+                None,
+            )
         if fail_gate:
             metrics[fail_gate["metric"]] = value_to_fail(
                 fail_gate["op"], float(fail_gate["threshold"])

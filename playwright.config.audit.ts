@@ -15,7 +15,7 @@ process.env.DOCLING_WORKER = doclingWorker;
 process.env.PYTHON_BIN = pythonBin;
 
 export default defineConfig({
-  testDir: "./e2e",
+  testDir: "./playwright/tests",
   timeout: 60_000,
   use: {
     baseURL: "http://127.0.0.1:3000",
@@ -32,6 +32,5 @@ export default defineConfig({
       DOCLING_WORKER: doclingWorker,
       PYTHON_BIN: pythonBin
     }
-  },
-  globalSetup: "./e2e/global-setup.ts"
+  }
 });

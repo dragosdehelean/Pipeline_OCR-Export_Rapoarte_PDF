@@ -14,6 +14,12 @@ const badPdf = path.join(
   "docs",
   "scan_like_no_text.pdf"
 );
+const unsupportedFile = path.join(
+  process.cwd(),
+  "fixtures",
+  "docs",
+  "unsupported.txt"
+);
 const gatesConfig = JSON.parse(
   fs.readFileSync(
     path.join(process.cwd(), "config", "quality-gates.json"),
@@ -25,7 +31,14 @@ const processTimeoutSec = Number(gatesConfig?.limits?.processTimeoutSec);
 if (!Number.isFinite(processTimeoutSec) || processTimeoutSec <= 0) {
   throw new Error("Invalid limits.processTimeoutSec in quality-gates.json");
 }
-const uploadTimeoutMs = processTimeoutSec * 1000;
+const uploadTimeoutMs = Math.min(processTimeoutSec * 1000, 60_000);
+const maxFileSizeMb = Number(gatesConfig?.limits?.maxFileSizeMb);
+if (!Number.isFinite(maxFileSizeMb) || maxFileSizeMb <= 0) {
+  throw new Error("Invalid limits.maxFileSizeMb in quality-gates.json");
+}
+const acceptLabel = Array.isArray(gatesConfig?.accept?.extensions)
+  ? gatesConfig.accept.extensions.join(", ")
+  : "";
 
 function minRequiredForMetric(config: any, metric: string) {
   let min = 0;
@@ -60,15 +73,7 @@ async function gotoAndWaitForUploadReady(page: Page) {
   if (!healthPayload?.ok) {
     throw new Error(`Health check failed: ${JSON.stringify(healthPayload)}`);
   }
-
-  await page.waitForFunction(
-    () => {
-      const button = document.querySelector("button[type='submit']");
-      return !!button && !button.hasAttribute("disabled");
-    },
-    null,
-    { timeout: 30000 }
-  );
+  await page.waitForSelector("input[type='file']", { timeout: 30000 });
 }
 
 async function uploadFile(page: Page, filePath: string) {
@@ -80,6 +85,7 @@ async function uploadFile(page: Page, filePath: string) {
   );
 
   await page.setInputFiles("input[type=file]", filePath);
+  await expect(page.getByRole("button", { name: "Upload" })).toBeEnabled();
   await page.getByRole("button", { name: "Upload" }).click();
 
   const uploadResponse = await uploadResponsePromise;
@@ -112,12 +118,45 @@ async function getTextChars(row: Locator) {
 }
 
 test.describe.serial("quality-critical e2e", () => {
-  test.setTimeout(uploadTimeoutMs * 2);
-
   test("upload good pdf -> SUCCESS -> exports present", async ({ page }) => {
+    test.setTimeout(uploadTimeoutMs * 2);
+    await page.addInitScript(() => {
+      let clipboardText = "";
+      Object.defineProperty(navigator, "clipboard", {
+        value: {
+          writeText: async (text: string) => {
+            clipboardText = text;
+          },
+          readText: async () => clipboardText
+        },
+        configurable: true
+      });
+      (window as any).__getClipboardText = () => clipboardText;
+    });
+
     await gotoAndWaitForUploadReady(page);
 
+    await expect(page.getByText(`Allowed: ${acceptLabel}`)).toBeVisible();
+    await expect(page.getByText(`Max file size: ${maxFileSizeMb} MB`)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Upload" })).toBeDisabled();
+
+    await page.setInputFiles("input[type=file]", unsupportedFile);
+    await expect(
+      page.getByText(`Unsupported file type. Allowed: ${acceptLabel}.`)
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Upload" })).toBeDisabled();
+    await page.getByRole("button", { name: "Clear selection" }).click();
+
+    await page.setInputFiles("input[type=file]", goodPdf);
+    await expect(page.getByTestId("selected-file")).toContainText("short_valid_text.pdf");
+    await page.getByRole("button", { name: "Clear selection" }).click();
+    await expect(page.getByTestId("selected-file")).toHaveCount(0);
+
+    await page.setInputFiles("input[type=file]", goodPdf);
     await uploadFile(page, goodPdf);
+
+    await expect(page.getByText("Upload complete")).toBeVisible();
+    await expect(page.getByRole("link", { name: "View details" })).toBeVisible();
 
     const goodRow = await getDocRow(page, "short_valid_text.pdf");
     await expect(goodRow.getByText("SUCCESS")).toBeVisible();
@@ -126,16 +165,55 @@ test.describe.serial("quality-critical e2e", () => {
     await page.getByRole("link", { name: "short_valid_text.pdf" }).click();
 
     await expect(page.getByRole("heading", { name: "Exports" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Download Markdown" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Download JSON" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Markdown" })).toBeVisible();
     await expect(page.getByRole("button", { name: "JSON" })).toBeVisible();
+
+    await expect(page.getByRole("button", { name: "Copy" })).toBeVisible();
+    await page.getByRole("button", { name: "Copy" }).click();
+    await expect(page.getByRole("button", { name: "Copied" })).toBeVisible();
+    const copiedMarkdown = await page.evaluate(
+      () => (window as any).__getClipboardText?.() as string
+    );
+    expect(copiedMarkdown).toContain("Fixture export");
+
+    await page.getByRole("button", { name: "JSON" }).click();
+    await page.getByRole("button", { name: "Copy" }).click();
+    const copiedJson = await page.evaluate(
+      () => (window as any).__getClipboardText?.() as string
+    );
+    expect(copiedJson).toContain("\n  ");
+    expect(JSON.parse(copiedJson)).toEqual({ ok: true });
+
+    const previewStyles = await page.evaluate(() => {
+      const pre = document.querySelector(".preview-pre");
+      if (!pre) {
+        return null;
+      }
+      const styles = getComputedStyle(pre);
+      return { maxHeight: styles.maxHeight, overflowY: styles.overflowY };
+    });
+    expect(previewStyles).not.toBeNull();
+    expect(previewStyles?.maxHeight).toBe("420px");
+    expect(previewStyles?.overflowY).toBe("auto");
+
+    const hasHorizontalScroll = await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth
+    );
+    expect(hasHorizontalScroll).toBeFalsy();
 
     const mdResponse = await page.request.get(`/api/docs/${goodId}/md`);
     expect(mdResponse.status()).toBe(200);
     const jsonResponse = await page.request.get(`/api/docs/${goodId}/json`);
     expect(jsonResponse.status()).toBe(200);
+    const jsonText = await jsonResponse.text();
+    expect(jsonText).toContain("\n  ");
+    expect(JSON.parse(jsonText)).toEqual({ ok: true });
   });
 
   test("upload bad pdf -> FAILED -> gates + no exports", async ({ page }) => {
+    test.setTimeout(uploadTimeoutMs * 2);
     await gotoAndWaitForUploadReady(page);
 
     await uploadFile(page, badPdf);
@@ -148,6 +226,16 @@ test.describe.serial("quality-critical e2e", () => {
     const badTextChars = await getTextChars(badRow);
     expect(goodTextChars).toBeGreaterThanOrEqual(minTextChars);
     expect(badTextChars).toBeLessThan(minTextChars);
+
+    const searchInput = page.getByRole("searchbox", { name: "Search documents" });
+    await searchInput.fill("scan_like");
+    await expect(page.getByRole("link", { name: "scan_like_no_text.pdf" })).toBeVisible();
+    await expect(page.locator("a", { hasText: "short_valid_text.pdf" })).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Clear" }).click();
+    await page.getByRole("tab", { name: "Failed" }).click();
+    await expect(page.getByRole("link", { name: "scan_like_no_text.pdf" })).toBeVisible();
+    await expect(page.locator("a", { hasText: "short_valid_text.pdf" })).toHaveCount(0);
 
     const badId = await getDocId(page, "scan_like_no_text.pdf");
     await page.getByRole("link", { name: "scan_like_no_text.pdf" }).click();

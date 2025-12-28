@@ -1,18 +1,91 @@
 "use client";
 
-import { useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 type PreviewProps = {
   markdown?: string | null;
   json?: string | null;
 };
 
+type CopyState = "idle" | "copied" | "error";
+
+function formatJson(value?: string | null) {
+  if (!value) {
+    return null;
+  }
+  try {
+    return `${JSON.stringify(JSON.parse(value), null, 2)}\n`;
+  } catch (error) {
+    return value;
+  }
+}
+
+async function copyToClipboard(value: string) {
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return true;
+  }
+
+  if (typeof document === "undefined") {
+    return false;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  const ok = document.execCommand("copy");
+  document.body.removeChild(textarea);
+  return ok;
+}
+
 export default function PreviewTabs({ markdown, json }: PreviewProps) {
   const [active, setActive] = useState<"markdown" | "json">(
     markdown ? "markdown" : "json"
   );
+  const [copyState, setCopyState] = useState<CopyState>("idle");
+  const resetTimeout = useRef<number | null>(null);
+  const formattedJson = useMemo(() => formatJson(json), [json]);
 
-  if (!markdown && !json) {
+  const hasContent = Boolean(markdown || json);
+  const activeText = active === "markdown" ? markdown : formattedJson;
+  const copyLabel =
+    copyState === "copied" ? "Copied" : copyState === "error" ? "Copy failed" : "Copy";
+
+  const handleCopy = async () => {
+    if (!activeText) {
+      return;
+    }
+    try {
+      const ok = await copyToClipboard(activeText);
+      setCopyState(ok ? "copied" : "error");
+    } catch (error) {
+      setCopyState("error");
+    }
+    if (resetTimeout.current) {
+      window.clearTimeout(resetTimeout.current);
+    }
+    resetTimeout.current = window.setTimeout(() => {
+      setCopyState("idle");
+    }, 1500);
+  };
+
+  useEffect(() => {
+    setCopyState("idle");
+  }, [active]);
+
+  useEffect(() => {
+    return () => {
+      if (resetTimeout.current) {
+        window.clearTimeout(resetTimeout.current);
+      }
+    };
+  }, []);
+
+  if (!hasContent) {
     return <div className="note">No exports available for preview.</div>;
   }
 
@@ -38,8 +111,24 @@ export default function PreviewTabs({ markdown, json }: PreviewProps) {
           </button>
         ) : null}
       </div>
-      {active === "markdown" && markdown ? <pre>{markdown}</pre> : null}
-      {active === "json" && json ? <pre>{json}</pre> : null}
+      <div className="preview-panel">
+        <div className="preview-toolbar">
+          <button
+            className="button ghost preview-copy"
+            onClick={handleCopy}
+            type="button"
+            disabled={!activeText}
+          >
+            {copyLabel}
+          </button>
+        </div>
+        {active === "markdown" && markdown ? (
+          <pre className="preview-pre">{markdown}</pre>
+        ) : null}
+        {active === "json" && formattedJson ? (
+          <pre className="preview-pre">{formattedJson}</pre>
+        ) : null}
+      </div>
     </div>
   );
 }

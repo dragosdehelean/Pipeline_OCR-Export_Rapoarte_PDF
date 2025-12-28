@@ -8,7 +8,13 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    const content = await fs.readFile(getJsonPath(params.id), "utf-8");
+    const raw = await fs.readFile(getJsonPath(params.id), "utf-8");
+    let content = raw;
+    try {
+      content = `${JSON.stringify(JSON.parse(raw), null, 2)}\n`;
+    } catch (error) {
+      content = raw;
+    }
     return new Response(content, {
       headers: { "content-type": "application/json; charset=utf-8" }
     });

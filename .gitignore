@@ -43,3 +43,6 @@ tmp-worker-test*/
 node_modules
 .env.local
 .env
+
+# UI/UX Audit
+ux-audit/

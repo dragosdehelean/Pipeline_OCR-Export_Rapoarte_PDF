@@ -1,3 +1,5 @@
+import fs from "fs";
+import path from "path";
 import { GET } from "../../app/api/health/route";
 import { getRequiredEnvKeys } from "../../lib/env";
 
@@ -32,6 +34,7 @@ describe("health api", () => {
     });
     expect(payload.resolved.PYTHON_BIN).toBeNull();
     expect(payload.resolved.DOCLING_WORKER).toBeNull();
+    expect(payload.config).toBeNull();
   });
 
   it("reports ok when env is set", async () => {
@@ -42,10 +45,18 @@ describe("health api", () => {
 
     const response = await GET();
     const payload = await response.json();
+    const gatesConfig = JSON.parse(
+      fs.readFileSync(
+        path.join(process.cwd(), "config", "quality-gates.json"),
+        "utf-8"
+      )
+    );
 
     expect(payload.ok).toBe(true);
     expect(payload.missingEnv).toEqual([]);
     expect(payload.resolved.PYTHON_BIN).toBe("python");
     expect(payload.resolved.DOCLING_WORKER).toBe("worker.py");
+    expect(payload.config.accept.extensions).toEqual(gatesConfig.accept.extensions);
+    expect(payload.config.limits.maxFileSizeMb).toBe(gatesConfig.limits.maxFileSizeMb);
   });
 });
