@@ -1,73 +1,129 @@
-# AGENTS.md — Doc Ingestion & Export (Docling-only)
+# Doc Ingestion & Export (Docling-only)
 
-Acest repo implementează un pipeline **local-first** pentru ingestie documente (PDF/DOCX) și export în **Markdown + JSON**, ca pas înainte de RAG. Constrângerile și pragurile sunt intenționat **config-driven** (fără hardcodări în cod sau în acest fișier).
+## 0) Project overview
 
-## Obiectiv verificabil (Definition of Done)
-Pe `localhost`, pot:
-- încărca un PDF/DOCX,
-- vedea **SUCCESS** cu `output.md` + `output.json` + `meta.json`,
-- sau **FAILED** cu motive (quality gates) + `meta.json` util pentru debug.
+A **local-first** ingestion pipeline for **PDF/DOCX** documents and exports **Markdown + JSON** artifacts as a prerequisite step for downstream RAG (no embeddings/vector store/chunking here yet).  
 
-## Principii care previn blocaje la scalare
-- **O singură sursă de adevăr pentru praguri/limite:** `config/quality-gates.json`. Nu duplica gate-uri / praguri în cod, în env sau în doc.
-- **Dovadă obiectivă înainte de final:** rulează testele relevante și repară până sunt verzi.
+- **Next.js (App Router)** provides the UI and API Route Handlers (upload, orchestration, serving artifacts).
+- A **Python worker** runs **Docling** to convert documents, compute metrics, evaluate quality gates, and write artifacts.
 
-## Arhitectură (overview)
-- **Next.js (App Router)**: UI + Route Handlers (orchestrare, upload, spawn worker, serve artifacts).
-- **Python worker (Docling)**: conversie, metrici, evaluare gates, scriere artefacte.
+## 1) Core commands (copy/paste)
+> Use the repo scripts. If a script is missing, **add it** to `package.json` (don’t invent ad-hoc commands).
 
-Boundary-ul este intenționat clar: **Node orchestration** → **Python processing**.
-
-## Artefacte pe document
-Pentru fiecare document cu `id` (folder `data/exports/<id>/` sau echivalentul din `DATA_DIR`):
-- La **SUCCESS**: `output.md`, `output.json`, `meta.json`
-- La **FAILED**: doar `meta.json` (iar `outputs.*Path = null`)
-
-`meta.json` se scrie **întotdeauna** și este sursa pentru UI (status, metrici, motive, logs tail).
-
-## Quality gates
-- Citește și aplică gates **exclusiv** din `config/quality-gates.json`.
-- Nu hardcoda praguri/limite în:
-  - worker,
-  - route handlers,
-  - UI.
-
-UI trebuie să afișeze **ce a spus config-ul** (cod + mesaj + actual vs expected) pe baza `meta.json`.
-
-## Setup local (minim)
-1) Creează `.env.local` din `.env.local.example` (în root).
-2) Setează cel puțin:
-   - `DATA_DIR`
-   - `GATES_CONFIG_PATH` (către `config/quality-gates.json`)
-   - `PYTHON_BIN`
-   - `DOCLING_WORKER` (entrypoint către worker)
-
-`GET /api/health` trebuie să expună rapid dacă setup-ul e incomplet, iar UI să blocheze upload până la `ok=true`.
-
-## Comenzi (folosește scripturile repo-ului)
-Node:
+Node / Next.js:
+- Install deps: `npm install`
 - Dev: `npm run dev`
 - Lint: `npm run lint`
-- Teste: `npm run test`
-- E2E: `npm run test:e2e` (dacă există)
+- Tests: `npm run test`
+- E2E: `npm run test:e2e`
 
-Python (worker):
-- Instalează deps: vezi `services/docling_worker/requirements.txt`
-- Teste: `python -m pytest -q`
+Python worker:
+- Install deps: `pip install -r services/docling_worker/requirements.txt`
+- Tests: `python -m pytest -q`
 
-Dacă un script lipsește, **adaugă-l** (nu inventa comenzi alternative fără să le pui în `package.json`).
+## 2) Repo map (where things go)
+- Next.js app + route handlers: `app/` (and/or `src/` if present)
+- Python worker: `services/docling_worker/`
+- Config (single source of truth for gates/limits): `config/quality-gates.json`
+- Uploaded files: `data/uploads/` (or under `DATA_DIR`)
+- Exported artifacts: `data/exports/<id>/` (or under `DATA_DIR`)
 
-## Testare: când și ce scrii
-- **Unit**: funcții pure, validări, mapări, helpers.
-- **Integration**: API + filesystem + spawn orchestration (fără browser).
-- **E2E**: user journeys critice (upload → status → detalii/preview; plus un “critical negative path” determinist).
+## 3) Tech Stack
 
-Fixtures pentru teste:
-- Folosește documente **valide și deterministe** (inclusiv “valid dar respins de gates”). Evită fișiere corupte ca negative-path principal.
+> Keep this section accurate. Prefer **pinning versions** in the repo (e.g., `.nvmrc`, `package.json#engines`, `.python-version`, `requirements.txt`) and update this list when they change.
 
-## Reguli anti-halucinație (pentru modificări)
-- Nu introduce API-uri/opțiuni neconfirmate: verifică în docs oficiale înainte să le pui în cod.
-- Dacă schimbi contracte (`meta.json`, API responses), actualizează testele de contract și UI în același PR.
+### Application
+- **Frontend/UI:** Next.js (App Router) + React + TypeScript
+- **Server/API:** Next.js Route Handlers (Node runtime)
+- **Doc processing worker:** Python CLI worker using **Docling**
+- **Storage:** Local filesystem under `DATA_DIR` (`data/uploads/`, `data/exports/<id>/`)
 
-## Obligatoriu la finalul oricărui task care modifică cod
-Rulează TOATE suitele relevante (unit + integration + e2e + pytest pentru worker). Dacă ceva eșuează, repară până sunt verzi.
+### Config & contracts
+- **Quality gates & limits:** `config/quality-gates.json` (single source of truth)
+- **Per-document contract:** `meta.json` (always written; UI reads status/metrics/gate results from it)
+
+### Tooling (recommended baseline)
+- **Runtime targets to pin:** Node.js 20 LTS, Python 3.12
+- **Node testing:** Vitest (unit/integration)
+- **E2E:** Playwright
+- **Python testing:** Pytest
+- **Lint/format:** ESLint (Next.js), plus a formatter (Prettier or equivalent)  
+- **Python lint/format (optional but recommended):** ruff + black
+
+## 4) Strict boundaries (must follow)
+
+### ✅ Always
+- Keep diffs small and scoped to the task.
+- Update/extend tests when behavior changes.
+- Run the relevant test suites before calling work “done”.
+
+### ⚠️ Ask first
+- Add/remove dependencies or change lockfiles due to new deps.
+- Large refactors across modules.
+- CI/CD changes.
+
+### 🚫 Never
+- Commit secrets/tokens/credentials.
+- Hardcode gate thresholds/limits in code or docs.
+- Delete tests just to make CI green.
+- Push directly on `main`
+
+## 5) Quality gates (single source of truth)
+- `config/quality-gates.json` is the **only** source of truth for:
+  - accepted types (`accept.*`)
+  - resource limits (`limits.*`)
+  - computed metrics (`quality.*` and any additional metric definitions)
+  - evaluation rules (`gates[]`)
+- Do **not** duplicate thresholds/limits in:
+  - the Python worker,
+  - Next.js route handlers,
+  - the UI,
+  - environment variables,
+  - this document.
+
+### meta.json is the contract
+- `meta.json` is written **always** (SUCCESS or FAILED).
+- The UI must render status, metrics, and gate results **from meta.json**.
+
+## 6) Per-document artifacts
+For each ingested document `id`:
+- **SUCCESS** → `output.md`, `output.json`, `meta.json`
+- **FAILED** → only `meta.json` and `outputs.*Path = null`
+
+## 7) Local setup (minimum)
+1) Create `.env.local` from `.env.local.example` in the repo root.
+2) Set at least:
+   - `DATA_DIR`
+   - `GATES_CONFIG_PATH` (path to `config/quality-gates.json`)
+   - `PYTHON_BIN`
+   - `DOCLING_WORKER` (Python worker entrypoint)
+3) `GET /api/health` must quickly report whether setup is complete.  
+   The UI must block upload until `ok=true`.
+
+## 8) Testing rules (keep tests high-signal)
+
+### What to test
+- **Unit**: pure functions/helpers/validators.
+- **Integration**: API + filesystem + spawn/orchestration (no browser).
+- **E2E**: all **critical user journeys**
+
+### Test quality requirements
+- Deterministic tests (no random, no time-dependent flakiness).
+- Fixtures must be **valid and deterministic** (including “valid but rejected by gates”).  
+- Avoid corrupt PDFs as the primary negative-path case.
+
+## 9) README maintenance (required)
+Update `README.md` when changes affect:
+- setup / env vars
+- available commands
+- project structure
+- new important dependencies
+
+## 10) If you’re stuck
+1) Ask a clarifying question.
+2) Propose a short plan.
+3) Don’t make large speculative changes without approval.
+
+## Final rule (mandatory)
+At the end of any task that changes code, run all relevant suites (Node tests, E2E if present, and Python worker tests).  
+If something fails, fix until everything is green.

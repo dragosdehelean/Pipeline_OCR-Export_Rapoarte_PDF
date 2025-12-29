@@ -2,6 +2,18 @@ import React from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { vi } from "vitest";
 import UploadForm from "../../components/UploadForm";
+import gatesConfig from "../../config/quality-gates.json";
+
+const healthConfig = {
+  accept: gatesConfig.accept,
+  limits: {
+    maxFileSizeMb: gatesConfig.limits.maxFileSizeMb,
+    maxPages: gatesConfig.limits.maxPages,
+    processTimeoutSec: gatesConfig.limits.processTimeoutSec
+  }
+};
+const acceptLabel = healthConfig.accept.extensions.join(", ");
+const maxFileSizeMb = healthConfig.limits.maxFileSizeMb;
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
@@ -46,10 +58,7 @@ describe("UploadForm", () => {
           ok: true,
           missingEnv: [],
           resolved: { PYTHON_BIN: "python", DOCLING_WORKER: "worker.py" },
-          config: {
-            accept: { mimeTypes: ["application/pdf"], extensions: [".pdf", ".docx"] },
-            limits: { maxFileSizeMb: 150, maxPages: 500, processTimeoutSec: 300 }
-          },
+          config: healthConfig,
           configError: null
         })
       } as unknown as Response)
@@ -58,9 +67,9 @@ describe("UploadForm", () => {
     render(<UploadForm />);
 
     const maxSizeLabel = await screen.findByText("Max file size:", { selector: "span" });
-    expect(maxSizeLabel.parentElement).toHaveTextContent("150 MB");
+    expect(maxSizeLabel.parentElement).toHaveTextContent(`${maxFileSizeMb} MB`);
     const allowedLabel = screen.getByText("Allowed:", { selector: "span" });
-    expect(allowedLabel.parentElement).toHaveTextContent(".pdf, .docx");
+    expect(allowedLabel.parentElement).toHaveTextContent(acceptLabel);
 
     const input = screen.getByLabelText("Choose a file");
     const file = new File(["content"], "sample.pdf", { type: "application/pdf" });
@@ -86,10 +95,7 @@ describe("UploadForm", () => {
           ok: true,
           missingEnv: [],
           resolved: { PYTHON_BIN: "python", DOCLING_WORKER: "worker.py" },
-          config: {
-            accept: { mimeTypes: ["application/pdf"], extensions: [".pdf", ".docx"] },
-            limits: { maxFileSizeMb: 150, maxPages: 500, processTimeoutSec: 300 }
-          },
+          config: healthConfig,
           configError: null
         })
       } as unknown as Response)
@@ -102,7 +108,7 @@ describe("UploadForm", () => {
     fireEvent.change(input, { target: { files: [file] } });
 
     expect(
-      await screen.findByText("Unsupported file type. Allowed: .pdf, .docx.")
+      await screen.findByText(`Unsupported file type. Allowed: ${acceptLabel}.`)
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Upload" })).toBeDisabled();
   });
@@ -116,10 +122,7 @@ describe("UploadForm", () => {
           ok: true,
           missingEnv: [],
           resolved: { PYTHON_BIN: "python", DOCLING_WORKER: "worker.py" },
-          config: {
-            accept: { mimeTypes: ["application/pdf"], extensions: [".pdf", ".docx"] },
-            limits: { maxFileSizeMb: 150, maxPages: 500, processTimeoutSec: 300 }
-          },
+          config: healthConfig,
           configError: null
         })
       } as unknown as Response)
