@@ -1,10 +1,11 @@
+<!-- @fileoverview Commenting rules for the AI coding agent. -->
 ## Reguli de Comentarii pentru AI Coding Agent
 
-### 1. FILE HEADER (obligatoriu pentru fiecare fișier nou)
+### 1. FILE HEADER (obligatoriu pentru toate fisierele unde se pot face comentarii)
 
 ```typescript
 /**
- * @fileoverview [O propoziție: DE CE există acest fișier]
+ * @fileoverview [Descrie cat mai explicit DE CE există acest fișier]
  */
 ```
 
@@ -12,7 +13,7 @@
 
 ```typescript
 /**
- * [O propoziție: CE PROBLEMĂ rezolvă]
+ * [Descrie cat mai explicit CE PROBLEMĂ rezolvă]
  *
  * @param x - [doar dacă nu e evident din nume]
  * @returns [doar dacă nu e evident din tip]

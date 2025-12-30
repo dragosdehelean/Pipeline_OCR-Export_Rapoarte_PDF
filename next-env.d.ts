@@ -1,3 +1,6 @@
+/**
+ * @fileoverview Next.js type references for the app router.
+ */
 /// <reference types="next" />
 /// <reference types="next/image-types/global" />
 import "./.next/dev/types/routes.d.ts";

@@ -1,3 +1,6 @@
+/**
+ * @fileoverview Vitest config for unit and integration tests.
+ */
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({

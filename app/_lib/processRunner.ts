@@ -1,3 +1,6 @@
+/**
+ * @fileoverview Runs a child process with output tailing and timeout control.
+ */
 import { spawn } from "node:child_process";
 
 export type ProcessResult = {
@@ -19,6 +22,9 @@ type RunOptions = {
   onStderrLine?: (line: string) => void;
 };
 
+/**
+ * Spawns a process and collects exit status plus tailed output.
+ */
 export function runProcess(options: RunOptions): Promise<ProcessResult> {
   const {
     command,

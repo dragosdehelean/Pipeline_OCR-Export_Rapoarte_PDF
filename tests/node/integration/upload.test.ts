@@ -1,3 +1,6 @@
+/**
+ * @fileoverview Integration tests for the upload and docs API flow.
+ */
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";

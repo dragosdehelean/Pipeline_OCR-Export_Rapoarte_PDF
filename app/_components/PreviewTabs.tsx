@@ -1,5 +1,8 @@
 "use client";
 
+/**
+ * @fileoverview Markdown/JSON preview tabs with copy support.
+ */
 import { useEffect, useMemo, useRef, useState } from "react";
 
 type PreviewProps = {
@@ -30,6 +33,7 @@ async function copyToClipboard(value: string) {
     return false;
   }
 
+  // WHY: Use execCommand fallback when Clipboard API is unavailable.
   const textarea = document.createElement("textarea");
   textarea.value = value;
   textarea.style.position = "fixed";
@@ -42,6 +46,9 @@ async function copyToClipboard(value: string) {
   return ok;
 }
 
+/**
+ * Renders markdown and JSON previews with copy actions.
+ */
 export default function PreviewTabs({ markdown, json }: PreviewProps) {
   const [active, setActive] = useState<"markdown" | "json">(
     markdown ? "markdown" : "json"

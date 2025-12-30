@@ -1,9 +1,15 @@
+/**
+ * @fileoverview Renders the main landing page for uploads and recent docs.
+ */
 import UploadForm from "./_components/UploadForm";
 import RecentDocs from "./_components/RecentDocs";
 import { listDocs } from "./_lib/storage";
 
 export const runtime = "nodejs";
 
+/**
+ * Fetches recent docs and renders the home page.
+ */
 export default async function HomePage() {
   const docs = await listDocs(50);
 

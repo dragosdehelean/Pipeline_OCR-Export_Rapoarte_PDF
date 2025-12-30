@@ -1,3 +1,4 @@
+"""Docling worker that converts documents and writes export artifacts."""
 import argparse
 import hashlib
 import json
@@ -15,10 +16,12 @@ except ImportError:
 
 
 def now_iso() -> str:
+    """Returns current UTC time as ISO-8601 with a Z suffix."""
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def sha256_file(path: str) -> str:
+    """Computes the SHA-256 hex digest of a file."""
     digest = hashlib.sha256()
     with open(path, "rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
@@ -27,6 +30,7 @@ def sha256_file(path: str) -> str:
 
 
 def export_doc_to_dict(document: Any) -> Dict[str, Any]:
+    """Exports a document to a plain dict using supported hooks."""
     export_fn = getattr(document, "export_to_dict", None)
     if callable(export_fn):
         return export_fn()
@@ -40,6 +44,7 @@ def export_doc_to_dict(document: Any) -> Dict[str, Any]:
 
 
 def compute_metrics(document: Any, markdown: str) -> Dict[str, float]:
+    """Computes basic page/text/table metrics for quality gates."""
     pages = 0
     if hasattr(document, "num_pages"):
         pages_value = getattr(document, "num_pages")
@@ -76,6 +81,7 @@ def compute_metrics(document: Any, markdown: str) -> Dict[str, float]:
 
 
 def clamp_tail(text: str, max_kb: int) -> str:
+    """Returns a UTF-8 safe tail of the input text capped to max_kb."""
     if max_kb <= 0:
         return ""
     max_bytes = max_kb * 1024
@@ -87,6 +93,7 @@ def clamp_tail(text: str, max_kb: int) -> str:
 
 
 def emit_progress(stage: str, message: str, progress: int) -> None:
+    """Prints a structured progress event for the Node orchestrator."""
     payload = {
         "event": "progress",
         "stage": stage,
@@ -97,6 +104,7 @@ def emit_progress(stage: str, message: str, progress: int) -> None:
 
 
 def get_docling_version() -> str:
+    """Returns the docling version when available."""
     try:
         import docling
 
@@ -110,6 +118,7 @@ def build_base_meta(
     input_path: str,
     config: Dict[str, Any],
 ) -> Dict[str, Any]:
+    """Builds the initial meta.json payload for a document."""
     size_bytes = os.path.getsize(input_path)
     return {
         "schemaVersion": 1,
@@ -160,11 +169,13 @@ def build_base_meta(
 
 
 def write_json(path: str, payload: Dict[str, Any]) -> None:
+    """Writes JSON to disk with indentation."""
     with open(path, "w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2)
 
 
 def run_conversion(args: argparse.Namespace) -> int:
+    """Runs the Docling conversion workflow and writes outputs."""
     config = load_config(args.gates)
     export_dir = os.path.join(args.data_dir, "exports", args.doc_id)
     os.makedirs(export_dir, exist_ok=True)
@@ -258,6 +269,7 @@ def run_conversion(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Creates the CLI argument parser for the worker."""
     parser = argparse.ArgumentParser(description="Docling worker")
     parser.add_argument("--input", required=True)
     parser.add_argument("--doc-id", required=True)
@@ -267,6 +279,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    """CLI entrypoint for the Docling worker."""
     args = build_parser().parse_args()
     return run_conversion(args)
 

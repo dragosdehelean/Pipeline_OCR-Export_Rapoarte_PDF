@@ -1,3 +1,6 @@
+/**
+ * @fileoverview Playwright config for UX audit screenshot runs.
+ */
 import { defineConfig } from "@playwright/test";
 import path from "node:path";
 
@@ -12,6 +15,7 @@ const doclingWorker =
   path.join(rootDir, "tests", "fixtures", "worker", "fake_worker.py");
 const pythonBin = process.env.PYTHON_BIN || "python";
 
+// WHY: Force deterministic env defaults for UX audit runs.
 process.env.DATA_DIR = dataDir;
 process.env.GATES_CONFIG_PATH = gatesConfigPath;
 process.env.DOCLING_WORKER = doclingWorker;

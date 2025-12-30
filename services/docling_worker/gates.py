@@ -1,8 +1,10 @@
+"""Quality gate evaluation for docling worker metrics."""
 import json
 from typing import Any, Dict, List, Tuple
 
 
 def load_config(path: str) -> Dict[str, Any]:
+    """Loads the gate config JSON from disk."""
     with open(path, "r", encoding="utf-8") as handle:
         return json.load(handle)
 
@@ -10,6 +12,7 @@ def load_config(path: str) -> Dict[str, Any]:
 def evaluate_gates(
     metrics: Dict[str, float], config: Dict[str, Any]
 ) -> Tuple[bool, List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Evaluates metrics against gate rules and returns pass/fail info."""
     evaluated = []
     failed = []
 

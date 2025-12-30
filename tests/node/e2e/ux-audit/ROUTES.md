@@ -1,3 +1,4 @@
+<!-- @fileoverview Target routes and goals for the UX audit. -->
 # UX Audit Routes
 
 This audit focuses on the core, unauthenticated flow for local document ingestion and export.

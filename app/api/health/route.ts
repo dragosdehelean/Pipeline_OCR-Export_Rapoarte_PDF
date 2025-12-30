@@ -1,3 +1,6 @@
+/**
+ * @fileoverview Health endpoint for env readiness and gate config preview.
+ */
 import { NextResponse } from "next/server";
 import { loadQualityGatesConfig, type QualityGatesConfig } from "../../_lib/config";
 import { getMissingEnv, getResolvedRuntimeEnv } from "../../_lib/env";
@@ -12,6 +15,9 @@ type HealthResponse = {
   configError: string | null;
 };
 
+/**
+ * Returns readiness info for UI gating and setup checks.
+ */
 export async function GET() {
   const missingEnv = getMissingEnv();
   const resolved = getResolvedRuntimeEnv();

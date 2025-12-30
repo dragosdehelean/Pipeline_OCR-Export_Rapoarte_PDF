@@ -1,3 +1,4 @@
+"""Tests for docling worker conversion helpers."""
 from services.docling_worker.convert import compute_metrics, export_doc_to_dict
 
 

@@ -1,3 +1,6 @@
+/**
+ * @fileoverview Playwright config for the local E2E test suite.
+ */
 import { defineConfig } from "@playwright/test";
 import path from "node:path";
 
@@ -11,6 +14,7 @@ const doclingWorker =
   path.join(rootDir, "tests", "fixtures", "worker", "fake_worker.py");
 const pythonBin = process.env.PYTHON_BIN || "python";
 
+// WHY: Force deterministic env defaults for the E2E worker fixtures.
 process.env.DATA_DIR = dataDir;
 process.env.GATES_CONFIG_PATH = gatesConfigPath;
 process.env.DOCLING_WORKER = doclingWorker;

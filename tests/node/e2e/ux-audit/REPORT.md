@@ -1,3 +1,4 @@
+<!-- @fileoverview UX audit findings and fixes for the ingestion UI. -->
 # UX Audit Report
 
 Methodology reference: Jakob Nielsen / NN/g "10 Usability Heuristics for User Interface Design"

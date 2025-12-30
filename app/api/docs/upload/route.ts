@@ -1,3 +1,6 @@
+/**
+ * @fileoverview Upload endpoint that spawns the Docling worker and tracks progress.
+ */
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import { NextResponse } from "next/server";
@@ -20,6 +23,9 @@ import { generateDocId, getFileExtension } from "../../../_lib/utils";
 
 export const runtime = "nodejs";
 
+/**
+ * Accepts an upload, validates gates, and kicks off worker processing.
+ */
 export async function POST(req: Request) {
   const requestId = crypto.randomUUID();
   const missingEnv = getMissingEnv();
@@ -195,6 +201,7 @@ export async function POST(req: Request) {
     progress: 5,
     message: "Starting worker."
   };
+  // WHY: Serialize progress/meta writes to avoid overlapping file operations.
   let writeQueue = Promise.resolve();
   let allowProgressWrites = true;
 
@@ -613,6 +620,7 @@ async function finalizeMeta(options: FinalizeOptions) {
   const finishedAt = new Date();
   let meta = options.meta;
 
+  // WHY: Grab a fresh meta snapshot in case progress writes updated the file.
   const snapshot = await readMetaSnapshot(metaPath, 3, 50);
   if (snapshot) {
     meta = snapshot;

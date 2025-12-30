@@ -1,3 +1,6 @@
+/**
+ * @fileoverview Normalizes meta.json into UI-friendly document metadata.
+ */
 import {
   docMetaSchema,
   type DocMeta,
@@ -6,6 +9,9 @@ import {
   type Metrics
 } from "./schema";
 
+/**
+ * Converts raw meta.json into a validated UI-friendly structure.
+ */
 export function toDocMeta(meta: MetaFile): DocMeta {
   const metrics = normalizeMetrics(meta.metrics);
   const failedGates = normalizeFailedGates(meta.qualityGates.failedGates);
@@ -25,6 +31,9 @@ export function toDocMeta(meta: MetaFile): DocMeta {
   return docMetaSchema.parse(raw);
 }
 
+/**
+ * Resolves the final document status from processing and gate outputs.
+ */
 export function resolveStatus(meta: MetaFile, failedGates: FailedGate[]): DocMeta["status"] {
   const processingStatus = meta.processing.status ?? "PENDING";
   const hasOutputs = Boolean(meta.outputs.markdownPath) && Boolean(meta.outputs.jsonPath);

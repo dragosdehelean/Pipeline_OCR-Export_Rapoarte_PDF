@@ -1,3 +1,6 @@
+/**
+ * @fileoverview Vitest config for Node-only integration tests.
+ */
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({

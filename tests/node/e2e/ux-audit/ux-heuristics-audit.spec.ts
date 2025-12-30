@@ -1,3 +1,6 @@
+/**
+ * @fileoverview Playwright UX audit screenshots for key UI states.
+ */
 import { expect, test, type Page } from "@playwright/test";
 import fs from "node:fs/promises";
 import path from "node:path";

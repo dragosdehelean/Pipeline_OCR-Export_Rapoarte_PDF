@@ -1,8 +1,14 @@
+/**
+ * @fileoverview Serves JSON export for a document.
+ */
 import fs from "node:fs/promises";
 import { getJsonPath } from "../../../../_lib/storage";
 
 export const runtime = "nodejs";
 
+/**
+ * Streams the JSON export for the requested document.
+ */
 export async function GET(
   _req: Request,
   { params }: { params: { id: string } | Promise<{ id: string }> }

@@ -1,8 +1,14 @@
+/**
+ * @fileoverview Serves markdown export for a document.
+ */
 import fs from "node:fs/promises";
 import { getMarkdownPath } from "../../../../_lib/storage";
 
 export const runtime = "nodejs";
 
+/**
+ * Streams the markdown export for the requested document.
+ */
 export async function GET(
   _req: Request,
   { params }: { params: { id: string } | Promise<{ id: string }> }

@@ -1,8 +1,10 @@
+"""Generates a large PDF fixture for size-based tests."""
 import argparse
 from pathlib import Path
 
 
 def build_pdf(page_count: int, output_path: Path, repeat: int) -> None:
+    """Builds a simple multi-page PDF with repeated text."""
     text = ("Lorem ipsum dolor sit amet, consectetur adipiscing elit. " * repeat).strip()
     header = b"%PDF-1.4\n"
 
@@ -63,6 +65,7 @@ def build_pdf(page_count: int, output_path: Path, repeat: int) -> None:
 
 
 def main() -> None:
+    """CLI entrypoint for generating the large PDF fixture."""
     parser = argparse.ArgumentParser(description="Generate a large PDF fixture.")
     parser.add_argument("--pages", type=int, default=150)
     parser.add_argument("--repeat", type=int, default=120)

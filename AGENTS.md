@@ -1,3 +1,4 @@
+<!-- @fileoverview Repository instructions for the Doc Ingestion & Export project. -->
 # Doc Ingestion & Export (Docling-only)
 
 ## 0) Project overview

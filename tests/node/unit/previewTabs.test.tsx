@@ -1,3 +1,6 @@
+/**
+ * @fileoverview Unit tests for the PreviewTabs component.
+ */
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { vi } from "vitest";
 import PreviewTabs from "../../../app/_components/PreviewTabs";

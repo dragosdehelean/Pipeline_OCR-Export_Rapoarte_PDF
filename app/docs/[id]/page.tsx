@@ -1,3 +1,6 @@
+/**
+ * @fileoverview Renders per-document detail pages with exports and metrics.
+ */
 import fs from "node:fs/promises";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -52,6 +55,9 @@ function formatProgress(value?: number | string | null) {
   return `${numeric}%`;
 }
 
+/**
+ * Loads meta and export previews for a single document.
+ */
 export default async function DocDetailsPage({
   params
 }: {

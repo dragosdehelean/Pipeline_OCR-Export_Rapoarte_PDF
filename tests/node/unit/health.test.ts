@@ -1,3 +1,6 @@
+/**
+ * @fileoverview Unit tests for the health endpoint readiness checks.
+ */
 import fs from "node:fs";
 import path from "node:path";
 import { GET } from "../../../app/api/health/route";

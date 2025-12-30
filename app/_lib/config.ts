@@ -1,3 +1,6 @@
+/**
+ * @fileoverview Loads and validates the quality gates config from disk.
+ */
 import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
@@ -50,6 +53,9 @@ export type QualityGatesConfig = z.infer<typeof qualityGatesSchema>;
 
 let cachedConfig: QualityGatesConfig | null = null;
 
+/**
+ * Resolves the quality gates config path from env or defaults.
+ */
 export function getGatesConfigPath(): string {
   return (
     process.env.GATES_CONFIG_PATH ||
@@ -57,6 +63,9 @@ export function getGatesConfigPath(): string {
   );
 }
 
+/**
+ * Loads and caches the parsed quality gates config.
+ */
 export async function loadQualityGatesConfig(): Promise<QualityGatesConfig> {
   if (cachedConfig) {
     return cachedConfig;

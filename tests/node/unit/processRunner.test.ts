@@ -1,3 +1,6 @@
+/**
+ * @fileoverview Unit tests for the process runner tailing behavior.
+ */
 import { runProcess } from "../../../app/_lib/processRunner";
 
 it("captures stdout and stderr tails", async () => {

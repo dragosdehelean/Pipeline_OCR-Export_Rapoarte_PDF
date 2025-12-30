@@ -1,3 +1,4 @@
+<!-- @fileoverview Project setup, scripts, and structure for the Docling ingestion pipeline. -->
 # Doc Ingestion & Export (Docling-only)
 
 Local-first Next.js app for PDF/DOCX upload, Docling conversion, strict quality gates, and Markdown/JSON exports.

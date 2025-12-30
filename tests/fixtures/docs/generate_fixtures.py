@@ -1,3 +1,4 @@
+"""Generates PDF fixtures that exercise quality gate thresholds."""
 import json
 import math
 from pathlib import Path
@@ -12,11 +13,13 @@ OUTPUT_DIR = Path(__file__).resolve().parent
 
 
 def load_config() -> dict:
+    """Loads the gate config used to size the fixtures."""
     with CONFIG_PATH.open("r", encoding="utf-8") as handle:
         return json.load(handle)
 
 
 def write_text_pdf(path: Path, title: str, lines: list[str], columns: int) -> None:
+    """Writes a multi-column text PDF fixture."""
     pdf = canvas.Canvas(str(path), pagesize=LETTER)
     width, height = LETTER
     margin = 48
@@ -47,6 +50,7 @@ def write_text_pdf(path: Path, title: str, lines: list[str], columns: int) -> No
 
 
 def write_scan_like_pdf(path: Path, title: str) -> None:
+    """Writes a scan-like PDF with low text content."""
     pdf = canvas.Canvas(str(path), pagesize=LETTER)
     width, height = LETTER
     margin = 48
@@ -59,6 +63,7 @@ def write_scan_like_pdf(path: Path, title: str) -> None:
 
 
 def derive_bounds(config: dict) -> dict:
+    """Derives numeric bounds per metric from gate rules."""
     bounds: dict[str, dict[str, object]] = {}
     for gate in config.get("gates", []):
         if not gate.get("enabled") or gate.get("severity") != "FAIL":
@@ -89,6 +94,7 @@ def derive_bounds(config: dict) -> dict:
 
 
 def choose_value(entry: dict) -> float:
+    """Chooses a value within bounds that avoids forbidden thresholds."""
     min_val = entry["min"]
     max_val = entry["max"]
     forbidden = entry["not"]
@@ -106,11 +112,13 @@ def choose_value(entry: dict) -> float:
 
 
 def required_metrics(config: dict) -> dict:
+    """Returns a metrics dict that satisfies all FAIL gates."""
     bounds = derive_bounds(config)
     return {metric: choose_value(entry) for metric, entry in bounds.items()}
 
 
 def build_good_lines(config: dict) -> list[str]:
+    """Builds enough lines to satisfy text-related gate thresholds."""
     required = required_metrics(config)
     min_text_chars = int(required.get("textChars", 0))
     min_md_chars = int(required.get("mdChars", 0))
@@ -134,6 +142,7 @@ def build_good_lines(config: dict) -> list[str]:
 
 
 def estimate_lines_per_page(columns: int) -> int:
+    """Estimates how many lines fit per page for layout sizing."""
     width, height = LETTER
     margin = 48
     line_height = 12
@@ -142,6 +151,7 @@ def estimate_lines_per_page(columns: int) -> int:
 
 
 def ensure_min_avg(total_lines: int, line_len: int, lines_per_page: int, min_avg: int) -> int:
+    """Ensures the average text chars per page clears the minimum."""
     if min_avg <= 0:
         return total_lines
     while True:
@@ -153,6 +163,7 @@ def ensure_min_avg(total_lines: int, line_len: int, lines_per_page: int, min_avg
 
 
 def main() -> None:
+    """Generates the fixture PDFs on disk."""
     config = load_config()
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 

@@ -1,3 +1,6 @@
+/**
+ * @fileoverview Defines Zod schemas and types for meta.json contracts.
+ */
 import { z } from "zod";
 
 export const mimeTypeSchema = z.enum([

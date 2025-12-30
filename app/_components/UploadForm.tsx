@@ -1,5 +1,8 @@
 "use client";
 
+/**
+ * @fileoverview Client-side upload flow with health gating and progress UI.
+ */
 import { useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -133,6 +136,9 @@ function updateDocsCache(current: DocMeta[] | undefined, next: DocMeta): DocMeta
   return docs.slice(0, 200);
 }
 
+/**
+ * Renders the upload form with validation and progress tracking.
+ */
 export default function UploadForm() {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const queryClient = useQueryClient();
@@ -181,6 +187,7 @@ export default function UploadForm() {
 
   const uploadFile = (file: File) =>
     new Promise<UploadResult>((resolve, reject) => {
+      // WHY: XMLHttpRequest exposes upload progress events; fetch does not.
       const formData = new FormData();
       formData.append("file", file);
 
@@ -341,6 +348,7 @@ export default function UploadForm() {
       queryClient.setQueryData<DocMeta[]>(["docs"], (current) =>
         updateDocsCache(current, docMeta)
       );
+      // WHY: Only invalidate when status changes to reduce redundant refetches.
       if (docMeta.status !== lastStatusRef.current) {
         lastStatusRef.current = docMeta.status;
         if (docMeta.status !== "PENDING") {

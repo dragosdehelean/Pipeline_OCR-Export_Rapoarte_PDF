@@ -1,3 +1,4 @@
+"""Runtime tests for docling conversion helpers and CLI flow."""
 import json
 import sys
 import types

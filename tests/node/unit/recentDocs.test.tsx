@@ -1,3 +1,6 @@
+/**
+ * @fileoverview Unit tests for the RecentDocs list filtering UI.
+ */
 import type { ReactNode } from "react";
 import { fireEvent, screen } from "@testing-library/react";
 import { vi } from "vitest";

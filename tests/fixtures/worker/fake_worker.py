@@ -1,3 +1,4 @@
+"""Fixture worker that simulates Docling conversion for tests."""
 import argparse
 import json
 import os
@@ -11,10 +12,12 @@ from services.docling_worker.gates import evaluate_gates, load_config
 
 
 def now_iso():
+    """Returns current UTC time as ISO-8601 with Z suffix."""
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def emit_progress(stage: str, message: str, progress: int) -> None:
+    """Prints progress events that the Node app can parse."""
     payload = {
         "event": "progress",
         "stage": stage,
@@ -25,6 +28,7 @@ def emit_progress(stage: str, message: str, progress: int) -> None:
 
 
 def derive_bounds(config: dict) -> dict:
+    """Derives numeric bounds per metric from gate config."""
     bounds: dict[str, dict[str, object]] = {}
     for gate in config.get("gates", []):
         if not gate.get("enabled") or gate.get("severity") != "FAIL":
@@ -55,6 +59,7 @@ def derive_bounds(config: dict) -> dict:
 
 
 def choose_value(entry: dict) -> float:
+    """Chooses a value within bounds that avoids forbidden thresholds."""
     min_val = entry["min"]
     max_val = entry["max"]
     forbidden = entry["not"]
@@ -72,11 +77,13 @@ def choose_value(entry: dict) -> float:
 
 
 def build_pass_metrics(config: dict) -> dict:
+    """Builds a metrics dict that passes all FAIL gates."""
     bounds = derive_bounds(config)
     return {metric: choose_value(entry) for metric, entry in bounds.items()}
 
 
 def value_to_fail(op: str, threshold: float) -> float:
+    """Returns a value that intentionally fails a single gate."""
     if op == ">":
         return threshold
     if op == ">=":
@@ -93,6 +100,7 @@ def value_to_fail(op: str, threshold: float) -> float:
 
 
 def main() -> int:
+    """Runs the fixture worker to generate meta.json and outputs."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True)
     parser.add_argument("--doc-id", required=True)

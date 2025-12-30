@@ -1,3 +1,4 @@
+"""Tests for quality gate evaluation logic."""
 import json
 from pathlib import Path
 

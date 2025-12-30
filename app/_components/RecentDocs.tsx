@@ -1,5 +1,8 @@
 "use client";
 
+/**
+ * @fileoverview Client-side list and filtering for recent documents.
+ */
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -51,6 +54,9 @@ async function fetchDocs(signal?: AbortSignal): Promise<DocMeta[]> {
   return parsed.success ? parsed.data : [];
 }
 
+/**
+ * Renders the recent documents list with filters and stats.
+ */
 export default function RecentDocs({ initialDocs = [] }: { initialDocs?: DocMeta[] }) {
   const docsQuery = useQuery({
     queryKey: ["docs"],

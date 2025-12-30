@@ -1,3 +1,6 @@
+/**
+ * @fileoverview Unit tests for the StatusBadge component.
+ */
 import { render, screen } from "@testing-library/react";
 import { StatusBadge } from "../../../app/_components/StatusBadge";
 

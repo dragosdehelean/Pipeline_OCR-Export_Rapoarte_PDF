@@ -1,3 +1,6 @@
+/**
+ * @fileoverview Unit tests for the UploadForm component behavior.
+ */
 import { fireEvent, screen } from "@testing-library/react";
 import { vi } from "vitest";
 import UploadForm from "../../../app/_components/UploadForm";

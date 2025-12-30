@@ -1,3 +1,6 @@
+/**
+ * @fileoverview Unit tests for meta schema parsing and mapping.
+ */
 import fs from "node:fs";
 import path from "node:path";
 import { toDocMeta } from "../../../app/_lib/meta";
