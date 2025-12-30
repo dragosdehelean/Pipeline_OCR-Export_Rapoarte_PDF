@@ -38,6 +38,7 @@ npm run dev
 - `npm run build`: build production bundle.
 - `npm run start`: run production server.
 - `npm run lint`: run ESLint.
+- `npm run typecheck`: run TypeScript type checks.
 - `npm run test`: run Vitest unit tests with coverage.
 - `npm run test:integration`: run Vitest integration tests with coverage.
 - `npm run test:e2e`: run Playwright E2E suite (excluding UX audit).
@@ -58,11 +59,35 @@ E2E tests (install browsers once):
 npx playwright install
 npm run test:e2e
 ```
+Custom E2E port (keep dev server running on another port):
+```
+$env:E2E_PORT=3002; npm run test:e2e
+```
+Custom E2E Next.js dist dir (avoid dev lock collisions):
+```
+$env:E2E_DIST_DIR=".next-e2e"; npm run test:e2e
+```
+Use an existing dev server (avoids Next.js dev lock issues):
+```
+$env:E2E_BASE_URL="http://127.0.0.1:3000"; npm run test:e2e
+```
 Optional UX audit (run on demand):
 ```
 UX_AUDIT_PHASE=before npm run test:ux
 UX_AUDIT_PHASE=after npm run test:ux
 npm run ux:diff
+```
+Custom UX audit port:
+```
+$env:UX_AUDIT_PORT=3003; npm run test:ux
+```
+Custom UX audit dist dir:
+```
+$env:UX_AUDIT_DIST_DIR=".next-ux-audit"; npm run test:ux
+```
+Use an existing dev server for UX audit:
+```
+$env:UX_AUDIT_BASE_URL="http://127.0.0.1:3000"; npm run test:ux
 ```
 Python tests:
 ```

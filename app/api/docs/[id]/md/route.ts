@@ -11,10 +11,10 @@ export const runtime = "nodejs";
  */
 export async function GET(
   _req: Request,
-  { params }: { params: { id: string } | Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await Promise.resolve(params);
+    const { id } = await params;
     const content = await fs.readFile(getMarkdownPath(id), "utf-8");
     return new Response(content, {
       headers: { "content-type": "text/markdown; charset=utf-8" }

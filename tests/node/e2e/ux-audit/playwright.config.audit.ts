@@ -14,6 +14,10 @@ const doclingWorker =
   process.env.DOCLING_WORKER ||
   path.join(rootDir, "tests", "fixtures", "worker", "fake_worker.py");
 const pythonBin = process.env.PYTHON_BIN || "python";
+const auditPort = Number(process.env.UX_AUDIT_PORT || "3000");
+const externalBaseUrl = process.env.UX_AUDIT_BASE_URL;
+const baseURL = externalBaseUrl ?? `http://127.0.0.1:${auditPort}`;
+const auditDistDir = process.env.UX_AUDIT_DIST_DIR || ".next-ux-audit";
 
 // WHY: Force deterministic env defaults for UX audit runs.
 process.env.DATA_DIR = dataDir;
@@ -27,19 +31,23 @@ export default defineConfig({
   outputDir: path.join(auditDir, "test-results"),
   timeout: 60_000,
   use: {
-    baseURL: "http://127.0.0.1:3000",
+    baseURL,
     trace: "retain-on-failure"
   },
-  webServer: {
-    command: "npm run dev -- --hostname 127.0.0.1 --port 3000 --webpack",
-    url: "http://127.0.0.1:3000",
-    reuseExistingServer: true,
-    timeout: 120_000,
-    env: {
-      DATA_DIR: dataDir,
-      GATES_CONFIG_PATH: gatesConfigPath,
-      DOCLING_WORKER: doclingWorker,
-      PYTHON_BIN: pythonBin
-    }
-  }
+  webServer: externalBaseUrl
+    ? undefined
+    : {
+        // WHY: Only start a dev server when not targeting an existing instance.
+        command: `npm run dev -- --hostname 127.0.0.1 --port ${auditPort} --webpack`,
+        url: `http://127.0.0.1:${auditPort}`,
+        reuseExistingServer: true,
+        timeout: 120_000,
+        env: {
+          DATA_DIR: dataDir,
+          GATES_CONFIG_PATH: gatesConfigPath,
+          DOCLING_WORKER: doclingWorker,
+          PYTHON_BIN: pythonBin,
+          NEXT_DIST_DIR: auditDistDir
+        }
+      }
 });

@@ -8,7 +8,6 @@ export default defineConfig({
     include: ["tests/node/**/*.test.ts", "tests/node/**/*.test.tsx"],
     environment: "jsdom",
     globals: true,
-    environmentMatchGlobs: [["tests/node/integration/**", "node"]],
     setupFiles: ["tests/node/setup.ts"],
     coverage: {
       provider: "v8",
@@ -26,6 +25,6 @@ export default defineConfig({
       functions: 80,
       branches: 75,
       statements: 80
-    }
+    } as any
   }
 });

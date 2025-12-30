@@ -157,7 +157,7 @@ test.describe("ux audit screenshots", () => {
     await stabilize(page);
 
     await uploadFile(page, goodPdf);
-    await page.waitForSelector("a", { hasText: "short_valid_text.pdf" });
+    await expect(page.locator("a", { hasText: "short_valid_text.pdf" }).first()).toBeVisible();
     await capture(page, "home", "desktop", "success");
     await capture(page, "home", "mobile", "success");
 
@@ -170,7 +170,7 @@ test.describe("ux audit screenshots", () => {
     await page.waitForURL("/");
 
     await uploadFile(page, badPdf);
-    await page.waitForSelector("a", { hasText: "scan_like_no_text.pdf" });
+    await expect(page.locator("a", { hasText: "scan_like_no_text.pdf" }).first()).toBeVisible();
     await capture(page, "home", "desktop", "with-failed");
     await capture(page, "home", "mobile", "with-failed");
 

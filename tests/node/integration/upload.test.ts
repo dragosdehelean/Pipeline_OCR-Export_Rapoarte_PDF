@@ -17,7 +17,7 @@ async function waitForMeta(id: string, timeoutMs = 2000): Promise<MetaFile> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const response = await getMeta(new Request("http://localhost/api/docs/" + id), {
-      params: { id }
+      params: Promise.resolve({ id })
     });
     if (response.ok) {
       const payload = await response.json();

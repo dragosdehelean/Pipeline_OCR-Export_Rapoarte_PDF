@@ -11,9 +11,17 @@ type HealthResponse = {
   ok: boolean;
   missingEnv: string[];
   resolved: ReturnType<typeof getResolvedRuntimeEnv>;
-  config: Pick<QualityGatesConfig, "accept" | "limits"> | null;
+  config: {
+    accept: QualityGatesConfig["accept"];
+    limits: Pick<
+      QualityGatesConfig["limits"],
+      "maxFileSizeMb" | "maxPages" | "processTimeoutSec"
+    >;
+  } | null;
   configError: string | null;
 };
+
+type HealthConfig = NonNullable<HealthResponse["config"]>;
 
 /**
  * Returns readiness info for UI gating and setup checks.
@@ -21,7 +29,7 @@ type HealthResponse = {
 export async function GET() {
   const missingEnv = getMissingEnv();
   const resolved = getResolvedRuntimeEnv();
-  let config: Pick<QualityGatesConfig, "accept" | "limits"> | null = null;
+  let config: HealthConfig | null = null;
   let configError: string | null = null;
 
   if (missingEnv.length === 0) {

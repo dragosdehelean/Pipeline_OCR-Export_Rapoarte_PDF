@@ -56,8 +56,8 @@ class MockXHR {
     }
     this.status = MockXHR.status;
     this.response = MockXHR.responsePayload;
-    if (!this.responseType && this.responsePayload) {
-      this.responseText = JSON.stringify(this.responsePayload);
+    if (!this.responseType && MockXHR.responsePayload) {
+      this.responseText = JSON.stringify(MockXHR.responsePayload);
     }
     if (this.upload.onprogress) {
       this.upload.onprogress({

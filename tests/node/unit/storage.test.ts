@@ -11,6 +11,7 @@ import {
   readIndex,
   upsertIndexDoc
 } from "../../../app/_lib/storage";
+import type { DocMeta } from "../../../app/_lib/schema";
 
 const originalDataDir = process.env.DATA_DIR;
 
@@ -35,7 +36,7 @@ describe("storage helpers", () => {
   });
 
   it("writes and reads index entries", async () => {
-    const doc = {
+    const doc: DocMeta = {
       id: "doc_123",
       originalFileName: "test.pdf",
       mimeType: "application/pdf",

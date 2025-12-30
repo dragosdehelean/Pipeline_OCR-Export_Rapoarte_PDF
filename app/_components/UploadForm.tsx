@@ -3,7 +3,15 @@
 /**
  * @fileoverview Client-side upload flow with health gating and progress UI.
  */
-import { useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type DragEvent,
+  type FormEvent
+} from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { StatusBadge } from "./StatusBadge";
@@ -263,7 +271,7 @@ export default function UploadForm() {
         return;
       }
 
-      const statusValue = (() => {
+      const statusValue: DocStatus = (() => {
         const statusRaw = getString(payload.status);
         if (statusRaw === "FAILED" || statusRaw === "SUCCESS" || statusRaw === "PENDING") {
           return statusRaw;
@@ -326,11 +334,11 @@ export default function UploadForm() {
     }
   };
 
-  const docQuery = useQuery({
-    queryKey: ["doc", activeDoc?.id ?? null],
+  const docQuery = useQuery<MetaFile, Error>({
+    queryKey: ["doc", activeDoc?.id ?? ""],
     queryFn: ({ queryKey, signal }) => {
-      const [, id] = queryKey;
-      if (typeof id !== "string") {
+      const [, id] = queryKey as ["doc", string];
+      if (!id) {
         throw new Error("Missing document id.");
       }
       return fetchDocMeta(id, signal);
@@ -342,21 +350,25 @@ export default function UploadForm() {
         return false;
       }
       return 1500;
-    },
-    onSuccess: (meta) => {
-      const docMeta = toDocMeta(meta);
-      queryClient.setQueryData<DocMeta[]>(["docs"], (current) =>
-        updateDocsCache(current, docMeta)
-      );
-      // WHY: Only invalidate when status changes to reduce redundant refetches.
-      if (docMeta.status !== lastStatusRef.current) {
-        lastStatusRef.current = docMeta.status;
-        if (docMeta.status !== "PENDING") {
-          void queryClient.invalidateQueries({ queryKey: ["docs"] });
-        }
-      }
     }
   });
+
+  useEffect(() => {
+    if (!docQuery.data) {
+      return;
+    }
+    const docMeta = toDocMeta(docQuery.data);
+    queryClient.setQueryData<DocMeta[]>(["docs"], (current) =>
+      updateDocsCache(current, docMeta)
+    );
+    // WHY: Only invalidate when status changes to reduce redundant refetches.
+    if (docMeta.status !== lastStatusRef.current) {
+      lastStatusRef.current = docMeta.status;
+      if (docMeta.status !== "PENDING") {
+        void queryClient.invalidateQueries({ queryKey: ["docs"] });
+      }
+    }
+  }, [docQuery.data, queryClient]);
 
   const processingState = useMemo(() => {
     if (!activeDoc) {
@@ -367,7 +379,7 @@ export default function UploadForm() {
     }
     const meta = docQuery.data;
     const metaStatus = meta.processing?.status;
-    const statusValue =
+    const statusValue: DocStatus =
       metaStatus === "FAILED" || metaStatus === "SUCCESS" ? metaStatus : "PENDING";
     const progressValue = getNumber(meta.processing?.progress);
     return {

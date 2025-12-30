@@ -180,9 +180,31 @@ export async function writeJsonAtomic(filePath: string, value: unknown): Promise
   const unique = `${process.pid}-${Date.now()}-${crypto.randomUUID()}`;
   const tmpPath = `${filePath}.${unique}.tmp`;
   await fs.writeFile(tmpPath, JSON.stringify(value, null, 2), "utf-8");
-  await fs.rename(tmpPath, filePath);
+  await renameWithRetry(tmpPath, filePath, 4, 50);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+async function renameWithRetry(
+  fromPath: string,
+  toPath: string,
+  attempts: number,
+  delayMs: number
+): Promise<void> {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      await fs.rename(fromPath, toPath);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (attempt < attempts - 1 && (code === "EPERM" || code === "EACCES" || code === "EBUSY")) {
+        // WHY: Windows can transiently lock files during rapid writes.
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        continue;
+      }
+      throw error;
+    }
+  }
 }

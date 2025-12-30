@@ -477,7 +477,7 @@ function applyFailure(meta: MetaFile, options: FailureOptions): MetaFile {
   const startedAt = resolveStartedAt(meta, options.finishedAt);
   const processing = {
     ...meta.processing,
-    status: "FAILED",
+    status: "FAILED" as const,
     stage: options.stage,
     message: options.message,
     exitCode: options.exitCode,
