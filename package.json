@@ -10,8 +10,8 @@
     "test": "vitest run --coverage",
     "test:integration": "vitest run --coverage --config vitest.integration.config.ts",
     "test:e2e": "playwright test",
-    "test:ux": "playwright test --config playwright.config.audit.ts",
-    "ux:diff": "node scripts/ux-diff.mjs"
+    "test:ux": "playwright test --config tests/node/e2e/ux-audit/playwright.config.audit.ts",
+    "ux:diff": "node tests/node/e2e/ux-audit/ux-diff.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.15",

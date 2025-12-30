@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { listDocs } from "../../../lib/storage";
-import type { DocMeta } from "../../../lib/schema";
+import { listDocs } from "../../_lib/storage";
+import type { DocMeta } from "../../_lib/schema";
 
 export const runtime = "nodejs";
 

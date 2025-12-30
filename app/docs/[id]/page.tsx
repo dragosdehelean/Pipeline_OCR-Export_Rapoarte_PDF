@@ -1,11 +1,11 @@
 import fs from "node:fs/promises";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import PreviewTabs from "../../../components/PreviewTabs";
-import { StatusBadge } from "../../../components/StatusBadge";
-import { resolveStatus } from "../../../lib/meta";
-import { getJsonPath, getMarkdownPath, readMetaFile } from "../../../lib/storage";
-import type { FailedGate, MetaFile, QualityGateEvaluation } from "../../../lib/schema";
+import PreviewTabs from "../../_components/PreviewTabs";
+import { StatusBadge } from "../../_components/StatusBadge";
+import { resolveStatus } from "../../_lib/meta";
+import { getJsonPath, getMarkdownPath, readMetaFile } from "../../_lib/storage";
+import type { FailedGate, MetaFile, QualityGateEvaluation } from "../../_lib/schema";
 
 export const runtime = "nodejs";
 

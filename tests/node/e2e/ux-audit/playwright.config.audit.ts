@@ -2,6 +2,7 @@ import { defineConfig } from "@playwright/test";
 import path from "node:path";
 
 const rootDir = process.cwd();
+const auditDir = path.join(rootDir, "tests", "node", "e2e", "ux-audit");
 const dataDir =
   process.env.DATA_DIR || path.join(rootDir, "tests", "node", "e2e", "data-test");
 const gatesConfigPath =
@@ -17,17 +18,17 @@ process.env.DOCLING_WORKER = doclingWorker;
 process.env.PYTHON_BIN = pythonBin;
 
 export default defineConfig({
-  testDir: "./tests/node/e2e",
-  testIgnore: ["**/ux-heuristics-audit.spec.ts"],
-  outputDir: "./tests/node/e2e/test-results",
+  testDir: auditDir,
+  testMatch: "**/*.spec.ts",
+  outputDir: path.join(auditDir, "test-results"),
   timeout: 60_000,
   use: {
-    baseURL: "http://127.0.0.1:3001",
+    baseURL: "http://127.0.0.1:3000",
     trace: "retain-on-failure"
   },
   webServer: {
-    command: "npm run dev -- --hostname 127.0.0.1 --port 3001 --webpack",
-    url: "http://127.0.0.1:3001",
+    command: "npm run dev -- --hostname 127.0.0.1 --port 3000 --webpack",
+    url: "http://127.0.0.1:3000",
     reuseExistingServer: true,
     timeout: 120_000,
     env: {
@@ -36,6 +37,5 @@ export default defineConfig({
       DOCLING_WORKER: doclingWorker,
       PYTHON_BIN: pythonBin
     }
-  },
-  globalSetup: "./tests/node/e2e/global-setup.ts"
+  }
 });

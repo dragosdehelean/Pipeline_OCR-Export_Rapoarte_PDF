@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { readMetaFile } from "../../../../lib/storage";
+import { readMetaFile } from "../../../_lib/storage";
 
 export const runtime = "nodejs";
 

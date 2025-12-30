@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { loadQualityGatesConfig, type QualityGatesConfig } from "../../../lib/config";
-import { getMissingEnv, getResolvedRuntimeEnv } from "../../../lib/env";
+import { loadQualityGatesConfig, type QualityGatesConfig } from "../../_lib/config";
+import { getMissingEnv, getResolvedRuntimeEnv } from "../../_lib/env";
 
 export const runtime = "nodejs";
 

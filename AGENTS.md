@@ -124,6 +124,15 @@ Update `README.md` when changes affect:
 2) Propose a short plan.
 3) Don’t make large speculative changes without approval.
 
+## 11) Supplementary agent docs
+
+Read these **before** working in the relevant area:
+- `agent_docs/COMMENTS_POLICY.md` — code comments, docstrings, inline docs
+
+> If a supplementary doc conflicts with this file, **this AGENTS.md takes precedence**.
+
+---
+
 ## Final rule (mandatory)
 At the end of any task that changes code, run all relevant suites (Node tests, E2E if present, and Python worker tests).  
 If something fails, fix until everything is green.

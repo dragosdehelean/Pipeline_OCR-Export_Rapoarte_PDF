@@ -1,5 +1,5 @@
 import fs from "node:fs/promises";
-import { getJsonPath } from "../../../../../lib/storage";
+import { getJsonPath } from "../../../../_lib/storage";
 
 export const runtime = "nodejs";
 

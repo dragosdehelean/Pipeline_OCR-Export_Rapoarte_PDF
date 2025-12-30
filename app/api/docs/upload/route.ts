@@ -1,8 +1,8 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import { NextResponse } from "next/server";
-import { getGatesConfigPath, loadQualityGatesConfig, type QualityGatesConfig } from "../../../../lib/config";
-import { getMissingEnv } from "../../../../lib/env";
+import { getGatesConfigPath, loadQualityGatesConfig, type QualityGatesConfig } from "../../../_lib/config";
+import { getMissingEnv } from "../../../_lib/env";
 import {
   ensureDataDirs,
   getDataDir,
@@ -12,11 +12,11 @@ import {
   getUploadPath,
   upsertIndexDoc,
   writeJsonAtomic
-} from "../../../../lib/storage";
-import { runProcess, type ProcessResult } from "../../../../lib/processRunner";
-import { toDocMeta } from "../../../../lib/meta";
-import { metaFileSchema, type DocStatus, type MetaFile } from "../../../../lib/schema";
-import { generateDocId, getFileExtension } from "../../../../lib/utils";
+} from "../../../_lib/storage";
+import { runProcess, type ProcessResult } from "../../../_lib/processRunner";
+import { toDocMeta } from "../../../_lib/meta";
+import { metaFileSchema, type DocStatus, type MetaFile } from "../../../_lib/schema";
+import { generateDocId, getFileExtension } from "../../../_lib/utils";
 
 export const runtime = "nodejs";
 

@@ -1,6 +1,6 @@
-import UploadForm from "../components/UploadForm";
-import RecentDocs from "../components/RecentDocs";
-import { listDocs } from "../lib/storage";
+import UploadForm from "./_components/UploadForm";
+import RecentDocs from "./_components/RecentDocs";
+import { listDocs } from "./_lib/storage";
 
 export const runtime = "nodejs";
 

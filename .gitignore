@@ -23,8 +23,8 @@ htmlcov/
 .coverage
 .coverage.*
 .pytest_cache/
-coverage/
-test-results/
+tests/node/coverage/
+tests/node/e2e/test-results/
 playwright-report/
 
 # Logs
@@ -37,7 +37,7 @@ playwright-report/
 Thumbs.db
 
 data/
-data-test/
+tests/node/e2e/data-test/
 tmp/
 tmp-worker-test*/
 .next/
@@ -46,4 +46,7 @@ node_modules
 .env
 
 # UI/UX Audit
-ux-audit/
+tests/node/e2e/ux-audit/before/
+tests/node/e2e/ux-audit/after/
+tests/node/e2e/ux-audit/diff/
+tests/node/e2e/ux-audit/test-results/

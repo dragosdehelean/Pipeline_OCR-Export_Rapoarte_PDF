@@ -1,5 +1,5 @@
 import fs from "node:fs/promises";
-import { getMarkdownPath } from "../../../../../lib/storage";
+import { getMarkdownPath } from "../../../../_lib/storage";
 
 export const runtime = "nodejs";
 
