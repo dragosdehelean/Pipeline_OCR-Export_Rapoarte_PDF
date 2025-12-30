@@ -1,13 +1,21 @@
 import { NextResponse } from "next/server";
-import { loadQualityGatesConfig } from "../../../lib/config";
+import { loadQualityGatesConfig, type QualityGatesConfig } from "../../../lib/config";
 import { getMissingEnv, getResolvedRuntimeEnv } from "../../../lib/env";
 
 export const runtime = "nodejs";
 
+type HealthResponse = {
+  ok: boolean;
+  missingEnv: string[];
+  resolved: ReturnType<typeof getResolvedRuntimeEnv>;
+  config: Pick<QualityGatesConfig, "accept" | "limits"> | null;
+  configError: string | null;
+};
+
 export async function GET() {
   const missingEnv = getMissingEnv();
   const resolved = getResolvedRuntimeEnv();
-  let config: { accept: unknown; limits: unknown } | null = null;
+  let config: Pick<QualityGatesConfig, "accept" | "limits"> | null = null;
   let configError: string | null = null;
 
   if (missingEnv.length === 0) {
@@ -28,7 +36,7 @@ export async function GET() {
 
   const ok = missingEnv.length === 0 && !configError;
 
-  return NextResponse.json({
+  return NextResponse.json<HealthResponse>({
     ok,
     missingEnv,
     resolved,

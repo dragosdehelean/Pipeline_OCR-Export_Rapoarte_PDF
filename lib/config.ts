@@ -1,8 +1,8 @@
-import fs from "fs/promises";
-import path from "path";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { z } from "zod";
 
-const gateSchema = z
+export const gateSchema = z
   .object({
     code: z.string(),
     enabled: z.boolean(),
@@ -14,7 +14,7 @@ const gateSchema = z
   })
   .strict();
 
-const qualityGatesSchema = z
+export const qualityGatesSchema = z
   .object({
     version: z.number(),
     strict: z.boolean(),

@@ -1,34 +1,50 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import { useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { StatusBadge } from "./StatusBadge";
+import type { QualityGatesConfig } from "../lib/config";
+import { toDocMeta } from "../lib/meta";
+import { metaFileSchema, type DocMeta, type DocStatus, type MetaFile } from "../lib/schema";
 
-type HealthConfig = {
-  accept: {
-    mimeTypes: string[];
-    extensions: string[];
-  };
-  limits: {
-    maxFileSizeMb: number;
-    maxPages: number;
-    processTimeoutSec: number;
-  };
+type HealthConfig = Pick<QualityGatesConfig, "accept"> & {
+  limits: Pick<
+    QualityGatesConfig["limits"],
+    "maxFileSizeMb" | "maxPages" | "processTimeoutSec"
+  >;
 };
 
-type HealthState = {
-  loading: boolean;
-  ok: boolean;
-  missingEnv: string[];
-  config: HealthConfig | null;
-  configError: string | null;
+type HealthPayload = {
+  ok?: boolean;
+  missingEnv?: string[];
+  config?: HealthConfig | null;
+  configError?: string | null;
 };
 
-type UploadNotice = {
+type UploadError = {
+  message: string;
+  requestId?: string;
+  statusCode?: number;
+  stage?: string;
+  docId?: string;
+};
+
+type ProcessingState = {
   id: string;
   name: string;
-  status: "SUCCESS" | "FAILED" | "PENDING";
+  status: DocStatus;
+  stage: string | null;
+  message: string | null;
+  progress: number | null;
+};
+
+type UploadPayload = Record<string, unknown>;
+
+type UploadResult = {
+  ok: boolean;
+  status: number;
+  payload: UploadPayload;
 };
 
 function formatBytes(bytes: number) {
@@ -74,62 +90,71 @@ function getFileTypeError(
   return "Unsupported file type.";
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function getString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function getNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+async function fetchHealth(signal?: AbortSignal): Promise<HealthPayload> {
+  const response = await fetch("/api/health", { cache: "no-store", signal });
+  if (!response.ok) {
+    throw new Error("Unable to load health status.");
+  }
+  return (await response.json()) as HealthPayload;
+}
+
+async function fetchDocMeta(id: string, signal?: AbortSignal): Promise<MetaFile> {
+  const response = await fetch(`/api/docs/${id}`, { cache: "no-store", signal });
+  if (!response.ok) {
+    throw new Error("Unable to load document status.");
+  }
+  return metaFileSchema.parse(await response.json());
+}
+
+function normalizeUploadPayload(value: unknown): UploadPayload {
+  return isRecord(value) ? value : {};
+}
+
+function updateDocsCache(current: DocMeta[] | undefined, next: DocMeta): DocMeta[] {
+  const docs = Array.isArray(current) ? [...current] : [];
+  const index = docs.findIndex((doc) => doc.id === next.id);
+  if (index >= 0) {
+    docs[index] = next;
+  } else {
+    docs.unshift(next);
+  }
+  return docs.slice(0, 200);
+}
+
 export default function UploadForm() {
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const router = useRouter();
-  const [isUploading, setIsUploading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const [error, setError] = useState<UploadError | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isDragActive, setIsDragActive] = useState(false);
-  const [lastUpload, setLastUpload] = useState<UploadNotice | null>(null);
-  const [health, setHealth] = useState<HealthState>({
-    loading: true,
-    ok: false,
-    missingEnv: [],
-    config: null,
-    configError: null
+  const [activeDoc, setActiveDoc] = useState<ProcessingState | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const lastStatusRef = useRef<ProcessingState["status"] | null>(null);
+
+  const healthQuery = useQuery({
+    queryKey: ["health"],
+    queryFn: ({ signal }) => fetchHealth(signal)
   });
-
-  useEffect(() => {
-    let active = true;
-    const checkHealth = async () => {
-      try {
-        const response = await fetch("/api/health");
-        const payload = (await response.json()) as {
-          ok?: boolean;
-          missingEnv?: string[];
-          config?: HealthConfig | null;
-          configError?: string | null;
-        };
-        if (!active) {
-          return;
-        }
-        setHealth({
-          loading: false,
-          ok: payload.ok === true,
-          missingEnv: Array.isArray(payload.missingEnv) ? payload.missingEnv : [],
-          config: payload.config ?? null,
-          configError: payload.configError ?? null
-        });
-      } catch (err) {
-        if (!active) {
-          return;
-        }
-        setHealth({
-          loading: false,
-          ok: false,
-          missingEnv: [],
-          config: null,
-          configError: null
-        });
-      }
-    };
-
-    checkHealth();
-    return () => {
-      active = false;
-    };
-  }, []);
+  const healthPayload = healthQuery.data;
+  const health = {
+    loading: healthQuery.isPending,
+    ok: healthPayload?.ok === true && !healthQuery.isError,
+    missingEnv: Array.isArray(healthPayload?.missingEnv) ? healthPayload?.missingEnv : [],
+    config: healthPayload?.config ?? null,
+    configError: healthPayload?.configError ?? null
+  };
 
   const acceptExtensions = health.config?.accept?.extensions ?? [];
   const acceptMimeTypes = health.config?.accept?.mimeTypes ?? [];
@@ -154,6 +179,116 @@ export default function UploadForm() {
     }
   };
 
+  const uploadFile = (file: File) =>
+    new Promise<UploadResult>((resolve, reject) => {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", "/api/docs/upload");
+      xhr.responseType = "json";
+
+      xhr.upload.onprogress = (event) => {
+        if (!event.lengthComputable) {
+          return;
+        }
+        const progress = Math.round((event.loaded / event.total) * 100);
+        setUploadProgress(progress);
+      };
+
+      xhr.onload = () => {
+        let payload = normalizeUploadPayload(xhr.response);
+        if (Object.keys(payload).length === 0 && typeof xhr.responseText === "string") {
+          try {
+            payload = normalizeUploadPayload(JSON.parse(xhr.responseText));
+          } catch (parseError) {
+            payload = {};
+          }
+        }
+        resolve({
+          ok: xhr.status >= 200 && xhr.status < 300,
+          status: xhr.status,
+          payload
+        });
+      };
+
+      xhr.onerror = () => {
+        reject(new Error("Upload failed."));
+      };
+
+      xhr.send(formData);
+    });
+
+  const uploadMutation = useMutation<UploadResult, Error, File>({
+    mutationFn: uploadFile,
+    onMutate: () => {
+      setError(null);
+      setUploadProgress(0);
+      setActiveDoc(null);
+      lastStatusRef.current = null;
+    },
+    onSuccess: ({ ok, payload, status }, file) => {
+      if (!ok) {
+        const errorPayload = isRecord(payload.error) ? payload.error : null;
+        const errorCode = getString(errorPayload?.code) ?? getString(payload.code);
+        if (errorCode === "MISSING_ENV") {
+          queryClient.setQueryData(["health"], {
+            ok: false,
+            missingEnv: Array.isArray(payload.missingEnv)
+              ? payload.missingEnv.filter((env) => typeof env === "string")
+              : [],
+            config: null,
+            configError: null
+          });
+          setError(null);
+          return;
+        }
+        setError({
+          message:
+            getString(errorPayload?.message) ||
+            getString(payload.message) ||
+            "Upload failed. Check the request ID for details.",
+          requestId: getString(errorPayload?.requestId) ?? getString(payload.requestId),
+          stage: getString(errorPayload?.stage) ?? getString(payload.stage),
+          statusCode: status,
+          docId: getString(payload.docId) ?? getString(payload.id)
+        });
+        return;
+      }
+
+      const statusValue = (() => {
+        const statusRaw = getString(payload.status);
+        if (statusRaw === "FAILED" || statusRaw === "SUCCESS" || statusRaw === "PENDING") {
+          return statusRaw;
+        }
+        return "PENDING";
+      })();
+      const responseId = getString(payload.id) ?? getString(payload.docId) ?? "";
+      if (!responseId) {
+        setError({ message: "Upload response missing document id." });
+        return;
+      }
+      setActiveDoc({
+        id: responseId,
+        name: getString(payload.originalFileName) ?? file.name,
+        status: statusValue,
+        stage: getString(payload.stage) ?? null,
+        message: null,
+        progress: getNumber(payload.progress) ?? null
+      });
+      clearSelectedFile();
+      void queryClient.invalidateQueries({ queryKey: ["docs"] });
+    },
+    onError: () => {
+      setError({ message: "Upload failed. Check the console for details." });
+    },
+    onSettled: () => {
+      setUploadProgress(null);
+    }
+  });
+
+  const isUploading = uploadMutation.isPending;
+
   const handleUpload = async (file: File | null) => {
     if (health.loading || !health.ok) {
       return;
@@ -162,81 +297,95 @@ export default function UploadForm() {
     if (!file) {
       const baseMessage = "Select a file first";
       const detail = acceptLabel !== "Not available" ? ` (allowed: ${acceptLabel}).` : ".";
-      setError(`${baseMessage}${detail}`);
+      setError({ message: `${baseMessage}${detail}` });
       return;
     }
 
     const typeError = getFileTypeError(file, acceptExtensions, acceptMimeTypes);
     if (typeError) {
-      setError(`${typeError} Allowed: ${acceptLabel}.`);
+      setError({ message: `${typeError} Allowed: ${acceptLabel}.` });
       return;
     }
 
     if (isFileTooLarge) {
-      setError(fileSizeError ?? "File exceeds max size.");
+      setError({ message: fileSizeError ?? "File exceeds max size." });
       return;
     }
 
-    setIsUploading(true);
-    setError(null);
-    const formData = new FormData();
-    formData.append("file", file);
-
     try {
-      const response = await fetch("/api/docs/upload", {
-        method: "POST",
-        body: formData
-      });
-
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        if (payload.code === "MISSING_ENV") {
-          setHealth({
-            loading: false,
-            ok: false,
-            missingEnv: Array.isArray(payload.missingEnv) ? payload.missingEnv : [],
-            config: null,
-            configError: null
-          });
-          setError(null);
-          return;
-        }
-        setError(payload.error || "Upload failed.");
-      } else {
-        const status =
-          payload.status === "FAILED" || payload.status === "PENDING"
-            ? payload.status
-            : "SUCCESS";
-        setLastUpload({
-          id: payload.id ?? "",
-          name: payload.originalFileName ?? file.name,
-          status
-        });
-        clearSelectedFile();
-        router.refresh();
-      }
+      await uploadMutation.mutateAsync(file);
     } catch (err) {
-      setError("Upload failed.");
-    } finally {
-      setIsUploading(false);
+      setError({ message: "Upload failed. Check the console for details." });
     }
   };
 
-  const onSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+  const docQuery = useQuery({
+    queryKey: ["doc", activeDoc?.id ?? null],
+    queryFn: ({ queryKey, signal }) => {
+      const [, id] = queryKey;
+      if (typeof id !== "string") {
+        throw new Error("Missing document id.");
+      }
+      return fetchDocMeta(id, signal);
+    },
+    enabled: Boolean(activeDoc?.id),
+    refetchInterval: (query) => {
+      const status = query.state.data?.processing?.status;
+      if (status === "FAILED" || status === "SUCCESS") {
+        return false;
+      }
+      return 1500;
+    },
+    onSuccess: (meta) => {
+      const docMeta = toDocMeta(meta);
+      queryClient.setQueryData<DocMeta[]>(["docs"], (current) =>
+        updateDocsCache(current, docMeta)
+      );
+      if (docMeta.status !== lastStatusRef.current) {
+        lastStatusRef.current = docMeta.status;
+        if (docMeta.status !== "PENDING") {
+          void queryClient.invalidateQueries({ queryKey: ["docs"] });
+        }
+      }
+    }
+  });
+
+  const processingState = useMemo(() => {
+    if (!activeDoc) {
+      return null;
+    }
+    if (!docQuery.data) {
+      return activeDoc;
+    }
+    const meta = docQuery.data;
+    const metaStatus = meta.processing?.status;
+    const statusValue =
+      metaStatus === "FAILED" || metaStatus === "SUCCESS" ? metaStatus : "PENDING";
+    const progressValue = getNumber(meta.processing?.progress);
+    return {
+      id: activeDoc.id,
+      name: meta.source?.originalFileName ?? activeDoc.name,
+      status: statusValue,
+      stage: meta.processing?.stage ?? activeDoc.stage,
+      message: meta.processing?.message ?? null,
+      progress: progressValue ?? activeDoc.progress
+    };
+  }, [activeDoc, docQuery.data]);
+
+  const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     await handleUpload(selectedFile);
   };
 
-  const onDrop = (event: React.DragEvent<HTMLDivElement>) => {
+  const onDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     const file = event.dataTransfer.files?.[0] ?? null;
     setIsDragActive(false);
     setSelectedFile(file);
     setError(null);
-    setLastUpload(null);
   };
 
-  const onDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+  const onDragOver = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     if (!isDragActive) {
       setIsDragActive(true);
@@ -247,11 +396,10 @@ export default function UploadForm() {
     setIsDragActive(false);
   };
 
-  const onFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const onFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0] ?? null;
     setSelectedFile(file);
     setError(null);
-    setLastUpload(null);
   };
 
   const isReady = !health.loading && health.ok;
@@ -259,6 +407,23 @@ export default function UploadForm() {
   const timeoutSec = health.config?.limits?.processTimeoutSec ?? null;
   const canUpload =
     isReady && !!selectedFile && !isUploading && !isFileTooLarge && !fileTypeError;
+
+  const processingLabel = (() => {
+    if (!processingState) {
+      return null;
+    }
+    if (processingState.status === "FAILED") {
+      return "Processing failed";
+    }
+    if (processingState.status === "SUCCESS") {
+      return "Processing complete";
+    }
+    return "Processing in progress";
+  })();
+
+  const processingStage = processingState?.stage
+    ? processingState.stage.replace(/_/g, " ")
+    : null;
 
   return (
     <form
@@ -289,21 +454,42 @@ export default function UploadForm() {
         <strong>Upload PDF/DOCX</strong>
         <div className="note">Docling-only, strict quality gates.</div>
       </div>
-      {lastUpload ? (
+      {processingState ? (
         <div
-          className={`alert ${lastUpload.status === "FAILED" ? "warning" : "success"}`}
+          className={`alert ${
+            processingState.status === "FAILED"
+              ? "error"
+              : processingState.status === "SUCCESS"
+                ? "success"
+                : "warning"
+          }`}
           role="status"
         >
-          <div className="alert-title">
-            {lastUpload.status === "FAILED" ? "Processed with issues" : "Upload complete"}
-          </div>
+          <div className="alert-title">{processingLabel}</div>
           <div className="alert-row">
-            <StatusBadge status={lastUpload.status} />
-            <div>{lastUpload.name}</div>
+            <StatusBadge status={processingState.status} />
+            <div>{processingState.name}</div>
           </div>
-          {lastUpload.id ? (
+          {processingStage ? <div className="note">Stage: {processingStage}</div> : null}
+          {processingState.message ? (
+            <div className="note">{processingState.message}</div>
+          ) : null}
+          {typeof processingState.progress === "number" ? (
+            <div className="progress">
+              <div className="progress-meta">
+                {processingState.progress}% complete
+              </div>
+              <div className="progress-bar">
+                <div
+                  className="progress-bar-fill"
+                  style={{ width: `${processingState.progress}%` }}
+                />
+              </div>
+            </div>
+          ) : null}
+          {processingState.id ? (
             <div className="alert-actions">
-              <Link className="button ghost" href={`/docs/${lastUpload.id}`}>
+              <Link className="button ghost" href={`/docs/${processingState.id}`}>
                 View details
               </Link>
             </div>
@@ -376,9 +562,35 @@ export default function UploadForm() {
       <button className="button" type="submit" disabled={!canUpload}>
         {isUploading ? "Uploading..." : "Upload"}
       </button>
+      {isUploading && uploadProgress !== null ? (
+        <div className="progress" role="status">
+          <div className="progress-meta">Uploading {uploadProgress}%</div>
+          <div className="progress-bar">
+            <div
+              className="progress-bar-fill"
+              style={{ width: `${uploadProgress}%` }}
+            />
+          </div>
+        </div>
+      ) : null}
       {error ? (
         <div className="alert error" role="alert">
-          {error}
+          <div className="alert-title">Upload failed</div>
+          <div>{error.message}</div>
+          {error.stage ? <div className="note">Stage: {error.stage}</div> : null}
+          {typeof error.statusCode === "number" ? (
+            <div className="note">Status: {error.statusCode}</div>
+          ) : null}
+          {error.requestId ? (
+            <div className="note">Request ID: {error.requestId}</div>
+          ) : null}
+          {error.docId ? (
+            <div className="alert-actions">
+              <Link className="button ghost" href={`/docs/${error.docId}`}>
+                View details
+              </Link>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </form>

@@ -1,10 +1,11 @@
-import fs from "fs/promises";
+import fs from "node:fs/promises";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import PreviewTabs from "../../../components/PreviewTabs";
 import { StatusBadge } from "../../../components/StatusBadge";
 import { resolveStatus } from "../../../lib/meta";
 import { getJsonPath, getMarkdownPath, readMetaFile } from "../../../lib/storage";
+import type { FailedGate, MetaFile, QualityGateEvaluation } from "../../../lib/schema";
 
 export const runtime = "nodejs";
 
@@ -43,33 +44,40 @@ function formatNumber(value?: number | string | null) {
   return new Intl.NumberFormat().format(numeric);
 }
 
+function formatProgress(value?: number | string | null) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return "n/a";
+  }
+  return `${numeric}%`;
+}
+
 export default async function DocDetailsPage({
   params
 }: {
-  params: { id: string };
+  params: { id: string } | Promise<{ id: string }>;
 }) {
-  let meta: Record<string, any>;
+  const { id } = await Promise.resolve(params);
+  let meta: MetaFile;
   try {
-    meta = await readMetaFile(params.id);
+    meta = await readMetaFile(id);
   } catch (error) {
     notFound();
   }
 
-  const markdown = await readOptionalFile(getMarkdownPath(params.id));
-  const jsonExport = await readOptionalFile(getJsonPath(params.id));
+  const markdown = await readOptionalFile(getMarkdownPath(id));
+  const jsonExport = await readOptionalFile(getJsonPath(id));
 
-  const failedGates = meta.qualityGates?.failedGates ?? [];
-  const evaluated = Array.isArray(meta.qualityGates?.evaluated)
-    ? meta.qualityGates.evaluated
-    : [];
+  const failedGates: FailedGate[] = meta.qualityGates?.failedGates ?? [];
+  const evaluated: QualityGateEvaluation[] = meta.qualityGates?.evaluated ?? [];
   const warningGates = evaluated.filter(
-    (gate: any) => gate.severity === "WARN" && !gate.passed
+    (gate) => gate.severity === "WARN" && !gate.passed
   );
-  const status = resolveStatus(meta as Record<string, unknown>, failedGates);
+  const status = resolveStatus(meta, failedGates);
 
   const hasMarkdown = Boolean(meta.outputs?.markdownPath);
   const hasJson = Boolean(meta.outputs?.jsonPath);
-  const docId = meta.id ?? params.id;
+  const docId = meta.id ?? id;
 
   return (
     <div className="container">
@@ -77,7 +85,7 @@ export default async function DocDetailsPage({
         <Link className="ghost-link" href="/">
           Back to documents
         </Link>
-        <h1>{meta.source?.originalFileName ?? params.id}</h1>
+        <h1>{meta.source?.originalFileName ?? id}</h1>
         <p>Document details and exports.</p>
       </header>
 
@@ -159,7 +167,22 @@ export default async function DocDetailsPage({
             <div className="label">Finished</div>
             <div>{formatDateTime(meta.processing?.finishedAt)}</div>
           </div>
+          <div>
+            <div className="label">Stage</div>
+            <div>{meta.processing?.stage ?? "n/a"}</div>
+          </div>
+          <div>
+            <div className="label">Progress</div>
+            <div>{formatProgress(meta.processing?.progress)}</div>
+          </div>
+          <div>
+            <div className="label">Request ID</div>
+            <div>{meta.processing?.requestId ?? meta.requestId ?? "n/a"}</div>
+          </div>
         </div>
+        {meta.processing?.message ? (
+          <div className="note">Message: {meta.processing.message}</div>
+        ) : null}
       </section>
 
       <section className="card grid">
@@ -179,10 +202,10 @@ export default async function DocDetailsPage({
           <div className="grid">
             <h3>Failed gates</h3>
             <div className="list">
-              {failedGates.map((gate: any) => (
+              {failedGates.map((gate) => (
                 <div className="list-item" key={gate.code}>
                   <strong>{gate.code}</strong>
-                  <div className="note">{gate.message}</div>
+                  <div className="note">{gate.message ?? "No details provided."}</div>
                   <div className="meta-row">
                     <span>Actual: {gate.actual}</span>
                     <span>Expected: {gate.expectedOp} {gate.expected}</span>
@@ -196,13 +219,15 @@ export default async function DocDetailsPage({
           <div className="grid">
             <h3>Warnings</h3>
             <div className="list">
-              {warningGates.map((gate: any) => (
+              {warningGates.map((gate) => (
                 <div className="list-item" key={gate.code}>
                   <strong>{gate.code}</strong>
                   <div className="note">{gate.message}</div>
                   <div className="meta-row">
                     <span>Actual: {gate.actual}</span>
-                    <span>Expected: {gate.op} {gate.threshold}</span>
+                    <span>
+                      Expected: {gate.op ?? gate.expectedOp ?? "?"} {gate.threshold ?? gate.expected ?? "?"}
+                    </span>
                   </div>
                 </div>
               ))}

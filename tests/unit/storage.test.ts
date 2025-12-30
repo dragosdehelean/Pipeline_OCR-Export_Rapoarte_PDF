@@ -1,4 +1,4 @@
-import path from "path";
+import path from "node:path";
 import {
   getUploadPath,
   getDataDir,
@@ -49,7 +49,7 @@ describe("storage helpers", () => {
   });
 
   afterAll(async () => {
-    const fs = await import("fs/promises");
+    const fs = await import("node:fs/promises");
     await fs.rm(getDataDir(), { recursive: true, force: true });
   });
 });

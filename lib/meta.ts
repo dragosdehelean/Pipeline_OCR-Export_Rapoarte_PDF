@@ -1,15 +1,21 @@
-import { docMetaSchema, Metrics, type DocMeta, type FailedGate } from "./schema";
+import {
+  docMetaSchema,
+  type DocMeta,
+  type FailedGate,
+  type MetaFile,
+  type Metrics
+} from "./schema";
 
-export function toDocMeta(meta: Record<string, unknown>): DocMeta {
-  const metrics = normalizeMetrics(meta);
-  const failedGates = normalizeFailedGates(meta);
-  const logs = normalizeLogs(meta);
+export function toDocMeta(meta: MetaFile): DocMeta {
+  const metrics = normalizeMetrics(meta.metrics);
+  const failedGates = normalizeFailedGates(meta.qualityGates.failedGates);
+  const logs = normalizeLogs(meta.logs);
   const status = resolveStatus(meta, failedGates);
   const raw = {
-    id: String(meta.id ?? ""),
-    originalFileName: String((meta.source as any)?.originalFileName ?? ""),
-    mimeType: String((meta.source as any)?.mimeType ?? ""),
-    createdAt: String(meta.createdAt ?? ""),
+    id: meta.id ?? "",
+    originalFileName: meta.source?.originalFileName ?? "",
+    mimeType: meta.source?.mimeType ?? "",
+    createdAt: meta.createdAt ?? "",
     status,
     metrics,
     failedGates,
@@ -19,13 +25,9 @@ export function toDocMeta(meta: Record<string, unknown>): DocMeta {
   return docMetaSchema.parse(raw);
 }
 
-export function resolveStatus(
-  meta: Record<string, unknown>,
-  failedGates: FailedGate[]
-): DocMeta["status"] {
-  const processingStatus = String((meta.processing as any)?.status ?? "PENDING");
-  const outputs = (meta.outputs as any) ?? {};
-  const hasOutputs = Boolean(outputs.markdownPath) && Boolean(outputs.jsonPath);
+export function resolveStatus(meta: MetaFile, failedGates: FailedGate[]): DocMeta["status"] {
+  const processingStatus = meta.processing.status ?? "PENDING";
+  const hasOutputs = Boolean(meta.outputs.markdownPath) && Boolean(meta.outputs.jsonPath);
 
   if (processingStatus === "PENDING") {
     return "PENDING";
@@ -46,36 +48,32 @@ export function resolveStatus(
   return "SUCCESS";
 }
 
-function normalizeMetrics(meta: Record<string, unknown>): Metrics {
-  const metrics = (meta.metrics as any) ?? {};
+function normalizeMetrics(metrics: Metrics): Metrics {
   return {
-    pages: Number(metrics.pages ?? 0),
-    textChars: Number(metrics.textChars ?? 0),
-    mdChars: Number(metrics.mdChars ?? 0),
-    textItems: Number(metrics.textItems ?? 0),
-    tables: Number(metrics.tables ?? 0),
-    textCharsPerPageAvg: Number(metrics.textCharsPerPageAvg ?? 0)
+    pages: Number.isFinite(metrics.pages) ? metrics.pages : 0,
+    textChars: Number.isFinite(metrics.textChars) ? metrics.textChars : 0,
+    mdChars: Number.isFinite(metrics.mdChars) ? metrics.mdChars : 0,
+    textItems: Number.isFinite(metrics.textItems) ? metrics.textItems : 0,
+    tables: Number.isFinite(metrics.tables) ? metrics.tables : 0,
+    textCharsPerPageAvg: Number.isFinite(metrics.textCharsPerPageAvg)
+      ? metrics.textCharsPerPageAvg
+      : 0
   };
 }
 
-function normalizeFailedGates(meta: Record<string, unknown>): FailedGate[] {
-  const gates = (meta.qualityGates as any)?.failedGates ?? [];
-  if (!Array.isArray(gates)) {
-    return [];
-  }
+function normalizeFailedGates(gates: FailedGate[]): FailedGate[] {
   return gates.map((gate) => ({
-    code: String(gate.code ?? ""),
-    message: String(gate.message ?? ""),
-    actual: Number(gate.actual ?? 0),
-    expectedOp: String(gate.expectedOp ?? ""),
-    expected: Number(gate.expected ?? 0)
+    code: gate.code ?? "",
+    message: gate.message ?? "",
+    actual: Number.isFinite(gate.actual) ? gate.actual : 0,
+    expectedOp: gate.expectedOp ?? "",
+    expected: Number.isFinite(gate.expected) ? gate.expected : 0
   }));
 }
 
-function normalizeLogs(meta: Record<string, unknown>): { stdoutTail: string; stderrTail: string } {
-  const logs = (meta.logs as any) ?? {};
+function normalizeLogs(logs: MetaFile["logs"]): { stdoutTail: string; stderrTail: string } {
   return {
-    stdoutTail: String(logs.stdoutTail ?? ""),
-    stderrTail: String(logs.stderrTail ?? "")
+    stdoutTail: logs.stdoutTail ?? "",
+    stderrTail: logs.stderrTail ?? ""
   };
 }

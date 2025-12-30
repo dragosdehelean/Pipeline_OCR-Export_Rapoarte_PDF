@@ -1,6 +1,7 @@
-import fs from "fs";
-import path from "path";
+import fs from "node:fs";
+import path from "node:path";
 import { GET } from "../../app/api/health/route";
+import { qualityGatesSchema } from "../../lib/config";
 import { getRequiredEnvKeys } from "../../lib/env";
 
 describe("health api", () => {
@@ -45,10 +46,12 @@ describe("health api", () => {
 
     const response = await GET();
     const payload = await response.json();
-    const gatesConfig = JSON.parse(
-      fs.readFileSync(
-        path.join(process.cwd(), "config", "quality-gates.json"),
-        "utf-8"
+    const gatesConfig = qualityGatesSchema.parse(
+      JSON.parse(
+        fs.readFileSync(
+          path.join(process.cwd(), "config", "quality-gates.json"),
+          "utf-8"
+        )
       )
     );
 

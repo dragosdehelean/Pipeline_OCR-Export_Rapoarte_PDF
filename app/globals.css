@@ -457,6 +457,32 @@ pre {
   font-weight: 600;
 }
 
+.progress {
+  display: grid;
+  gap: 6px;
+}
+
+.progress-meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.progress-bar {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #eef2ee;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, var(--accent) 0%, var(--accent-strong) 100%);
+  transition: width 180ms ease;
+}
+
 .label {
   font-size: 12px;
   color: var(--muted);

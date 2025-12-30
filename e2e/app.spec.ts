@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import fs from "fs";
-import path from "path";
+import fs from "node:fs";
+import path from "node:path";
+import { qualityGatesSchema, type QualityGatesConfig } from "../lib/config";
 
 const goodPdf = path.join(
   process.cwd(),
@@ -20,10 +21,12 @@ const unsupportedFile = path.join(
   "docs",
   "unsupported.txt"
 );
-const gatesConfig = JSON.parse(
-  fs.readFileSync(
-    path.join(process.cwd(), "config", "quality-gates.json"),
-    "utf-8"
+const gatesConfig = qualityGatesSchema.parse(
+  JSON.parse(
+    fs.readFileSync(
+      path.join(process.cwd(), "config", "quality-gates.json"),
+      "utf-8"
+    )
   )
 );
 
@@ -40,7 +43,7 @@ const acceptLabel = Array.isArray(gatesConfig?.accept?.extensions)
   ? gatesConfig.accept.extensions.join(", ")
   : "";
 
-function minRequiredForMetric(config: any, metric: string) {
+function minRequiredForMetric(config: QualityGatesConfig, metric: string) {
   let min = 0;
   for (const gate of config?.gates ?? []) {
     if (!gate?.enabled || gate?.severity !== "FAIL" || gate?.metric !== metric) {
@@ -131,7 +134,8 @@ test.describe.serial("quality-critical e2e", () => {
         },
         configurable: true
       });
-      (window as any).__getClipboardText = () => clipboardText;
+      (window as Window & { __getClipboardText?: () => string }).__getClipboardText =
+        () => clipboardText;
     });
 
     await gotoAndWaitForUploadReady(page);
@@ -155,11 +159,18 @@ test.describe.serial("quality-critical e2e", () => {
     await page.setInputFiles("input[type=file]", goodPdf);
     await uploadFile(page, goodPdf);
 
-    await expect(page.getByText("Upload complete")).toBeVisible();
-    await expect(page.getByRole("link", { name: "View details" })).toBeVisible();
+    await expect(page.locator(".alert-title", { hasText: "Processing complete" })).toBeVisible();
+    await expect(
+      page.getByRole("status").getByRole("link", { name: "View details" })
+    ).toBeVisible();
 
     const goodRow = await getDocRow(page, "short_valid_text.pdf");
-    await expect(goodRow.getByText("SUCCESS")).toBeVisible();
+    const goodStatus = goodRow.locator(".badge");
+    await expect(goodStatus).toBeVisible();
+    await expect.poll(
+      async () => (await goodStatus.textContent())?.trim(),
+      { timeout: uploadTimeoutMs }
+    ).toBe("SUCCESS");
 
     const goodId = await getDocId(page, "short_valid_text.pdf");
     await page.getByRole("link", { name: "short_valid_text.pdf" }).click();
@@ -174,14 +185,18 @@ test.describe.serial("quality-critical e2e", () => {
     await page.getByRole("button", { name: "Copy" }).click();
     await expect(page.getByRole("button", { name: "Copied" })).toBeVisible();
     const copiedMarkdown = await page.evaluate(
-      () => (window as any).__getClipboardText?.() as string
+      () =>
+        (window as Window & { __getClipboardText?: () => string }).__getClipboardText?.() ??
+        ""
     );
     expect(copiedMarkdown).toContain("Fixture export");
 
     await page.getByRole("button", { name: "JSON" }).click();
     await page.getByRole("button", { name: "Copy" }).click();
     const copiedJson = await page.evaluate(
-      () => (window as any).__getClipboardText?.() as string
+      () =>
+        (window as Window & { __getClipboardText?: () => string }).__getClipboardText?.() ??
+        ""
     );
     expect(copiedJson).toContain("\n  ");
     expect(JSON.parse(copiedJson)).toEqual({ ok: true });

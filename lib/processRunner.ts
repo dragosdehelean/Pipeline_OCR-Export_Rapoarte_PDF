@@ -1,4 +1,4 @@
-import { spawn } from "child_process";
+import { spawn } from "node:child_process";
 
 export type ProcessResult = {
   exitCode: number;
@@ -15,12 +15,25 @@ type RunOptions = {
   timeoutMs: number;
   stdoutTailBytes: number;
   stderrTailBytes: number;
+  onStdoutLine?: (line: string) => void;
+  onStderrLine?: (line: string) => void;
 };
 
 export function runProcess(options: RunOptions): Promise<ProcessResult> {
-  const { command, args, cwd, timeoutMs, stdoutTailBytes, stderrTailBytes } = options;
+  const {
+    command,
+    args,
+    cwd,
+    timeoutMs,
+    stdoutTailBytes,
+    stderrTailBytes,
+    onStdoutLine,
+    onStderrLine
+  } = options;
   const stdoutTail = createTailBuffer(stdoutTailBytes);
   const stderrTail = createTailBuffer(stderrTailBytes);
+  const stdoutLines = onStdoutLine ? createLineBuffer() : null;
+  const stderrLines = onStderrLine ? createLineBuffer() : null;
 
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -39,20 +52,30 @@ export function runProcess(options: RunOptions): Promise<ProcessResult> {
 
     child.stdout?.on("data", (chunk: Buffer) => {
       stdoutTail.append(chunk);
+      if (stdoutLines && onStdoutLine) {
+        stdoutLines.append(chunk, onStdoutLine);
+      }
     });
 
     child.stderr?.on("data", (chunk: Buffer) => {
       stderrTail.append(chunk);
+      if (stderrLines && onStderrLine) {
+        stderrLines.append(chunk, onStderrLine);
+      }
     });
 
     child.on("error", (error) => {
       clearTimeout(timeout);
+      stdoutLines?.flush(onStdoutLine ?? (() => {}));
+      stderrLines?.flush(onStderrLine ?? (() => {}));
       stderrTail.append(Buffer.from(String(error)));
       reject(error);
     });
 
     child.on("close", (code, signal) => {
       clearTimeout(timeout);
+      stdoutLines?.flush(onStdoutLine ?? (() => {}));
+      stderrLines?.flush(onStderrLine ?? (() => {}));
       resolve({
         exitCode: typeof code === "number" ? code : -1,
         signal: signal ?? null,
@@ -67,6 +90,11 @@ export function runProcess(options: RunOptions): Promise<ProcessResult> {
 type TailBuffer = {
   append: (chunk: Buffer) => void;
   toString: () => string;
+};
+
+type LineBuffer = {
+  append: (chunk: Buffer, onLine: (line: string) => void) => void;
+  flush: (onLine: (line: string) => void) => void;
 };
 
 function createTailBuffer(maxBytes: number): TailBuffer {
@@ -84,6 +112,36 @@ function createTailBuffer(maxBytes: number): TailBuffer {
     },
     toString() {
       return buffer.toString("utf-8");
+    }
+  };
+}
+
+function createLineBuffer(): LineBuffer {
+  let buffer = "";
+
+  const flushLine = (line: string, onLine: (line: string) => void) => {
+    const trimmed = line.endsWith("\r") ? line.slice(0, -1) : line;
+    if (trimmed.length > 0) {
+      onLine(trimmed);
+    }
+  };
+
+  return {
+    append(chunk, onLine) {
+      buffer += chunk.toString("utf-8");
+      let index = buffer.indexOf("\n");
+      while (index >= 0) {
+        const line = buffer.slice(0, index);
+        buffer = buffer.slice(index + 1);
+        flushLine(line, onLine);
+        index = buffer.indexOf("\n");
+      }
+    },
+    flush(onLine) {
+      if (buffer.length > 0) {
+        flushLine(buffer, onLine);
+        buffer = "";
+      }
     }
   };
 }

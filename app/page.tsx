@@ -20,11 +20,7 @@ export default async function HomePage() {
 
       <section className="card grid">
         <h2>Recent documents</h2>
-        {docs.length === 0 ? (
-          <div className="note">No documents processed yet.</div>
-        ) : (
-          <RecentDocs docs={docs} />
-        )}
+        <RecentDocs initialDocs={docs} />
       </section>
     </div>
   );

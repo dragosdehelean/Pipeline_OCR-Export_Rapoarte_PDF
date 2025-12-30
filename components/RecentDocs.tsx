@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import React, { useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { StatusBadge } from "./StatusBadge";
-import type { DocMeta } from "../lib/schema";
+import { docMetaSchema, type DocMeta, type DocStatus } from "../lib/schema";
 
-type StatusFilter = "all" | DocMeta["status"];
+type StatusFilter = "all" | DocStatus;
 
 const statusOptions: { label: string; value: StatusFilter }[] = [
   { label: "All", value: "all" },
@@ -40,7 +41,28 @@ function summarizeFailure(doc: DocMeta) {
   return `${first.message} (+${rest.length} more)`;
 }
 
-export default function RecentDocs({ docs }: { docs: DocMeta[] }) {
+async function fetchDocs(signal?: AbortSignal): Promise<DocMeta[]> {
+  const response = await fetch("/api/docs", { cache: "no-store", signal });
+  if (!response.ok) {
+    throw new Error("Failed to load documents.");
+  }
+  const payload = (await response.json()) as { docs?: unknown };
+  const parsed = docMetaSchema.array().safeParse(payload.docs);
+  return parsed.success ? parsed.data : [];
+}
+
+export default function RecentDocs({ initialDocs = [] }: { initialDocs?: DocMeta[] }) {
+  const docsQuery = useQuery({
+    queryKey: ["docs"],
+    queryFn: ({ signal }) => fetchDocs(signal),
+    initialData: initialDocs,
+    staleTime: 10_000,
+    refetchInterval: (query) => {
+      const docs = query.state.data ?? [];
+      return docs.some((doc) => doc.status === "PENDING") ? 2000 : false;
+    }
+  });
+  const docs = docsQuery.data ?? initialDocs;
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
@@ -66,6 +88,16 @@ export default function RecentDocs({ docs }: { docs: DocMeta[] }) {
   }, [docs, query, statusFilter]);
 
   const hasFilters = statusFilter !== "all" || query.trim().length > 0;
+
+  if (docs.length === 0) {
+    if (docsQuery.isPending) {
+      return <div className="note">Loading documents...</div>;
+    }
+    if (docsQuery.isError) {
+      return <div className="note">Unable to load documents.</div>;
+    }
+    return <div className="note">No documents processed yet.</div>;
+  }
 
   return (
     <div className="grid">
@@ -113,10 +145,14 @@ export default function RecentDocs({ docs }: { docs: DocMeta[] }) {
             </button>
           ))}
           {hasFilters ? (
-            <button type="button" className="pill subtle" onClick={() => {
-              setQuery("");
-              setStatusFilter("all");
-            }}>
+            <button
+              type="button"
+              className="pill subtle"
+              onClick={() => {
+                setQuery("");
+                setStatusFilter("all");
+              }}
+            >
               Clear
             </button>
           ) : null}

@@ -1,5 +1,5 @@
-import fs from "fs/promises";
-import path from "path";
+import fs from "node:fs/promises";
+import path from "node:path";
 
 export default async function globalSetup() {
   const dataDir = process.env.DATA_DIR || path.join(process.cwd(), "data");

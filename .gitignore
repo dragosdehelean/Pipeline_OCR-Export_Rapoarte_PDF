@@ -38,6 +38,7 @@ Thumbs.db
 
 data/
 data-test/
+tmp/
 tmp-worker-test*/
 .next/
 node_modules

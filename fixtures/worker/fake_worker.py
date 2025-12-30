@@ -14,6 +14,16 @@ def now_iso():
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def emit_progress(stage: str, message: str, progress: int) -> None:
+    payload = {
+        "event": "progress",
+        "stage": stage,
+        "message": message,
+        "progress": progress,
+    }
+    print(json.dumps(payload), flush=True)
+
+
 def derive_bounds(config: dict) -> dict:
     bounds: dict[str, dict[str, object]] = {}
     for gate in config.get("gates", []):
@@ -95,6 +105,7 @@ def main() -> int:
     os.makedirs(export_dir, exist_ok=True)
     meta_path = os.path.join(export_dir, "meta.json")
 
+    emit_progress("INIT", "Preparing fixture worker.", 5)
     size_bytes = os.path.getsize(args.input)
     file_name = os.path.basename(args.input).lower()
     try:
@@ -152,6 +163,7 @@ def main() -> int:
 
     passed, failed, evaluated = evaluate_gates(metrics, config)
     status = "SUCCESS" if passed else "FAILED"
+    emit_progress("GATES", "Evaluated quality gates.", 80)
 
     outputs = {
         "markdownPath": None,
@@ -160,6 +172,7 @@ def main() -> int:
     }
 
     if passed:
+        emit_progress("WRITE_OUTPUTS", "Writing fixture outputs.", 92)
         md_path = os.path.join(export_dir, "output.md")
         json_path = os.path.join(export_dir, "output.json")
         with open(md_path, "w", encoding="utf-8") as handle:
@@ -211,9 +224,9 @@ def main() -> int:
         "logs": {"stdoutTail": "fake worker", "stderrTail": ""},
     }
 
+    emit_progress("DONE", "Fixture processing complete.", 100)
     with open(meta_path, "w", encoding="utf-8") as handle:
         json.dump(meta, handle, indent=2)
-
     return 0
 
 

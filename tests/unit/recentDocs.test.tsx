@@ -1,12 +1,13 @@
-import React from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { fireEvent, screen } from "@testing-library/react";
 import { vi } from "vitest";
 import RecentDocs from "../../components/RecentDocs";
 import type { DocMeta } from "../../lib/schema";
+import { renderWithClient } from "../utils/render";
 
 vi.mock("next/link", () => ({
   __esModule: true,
-  default: ({ href, children, className }: { href: string; children: React.ReactNode; className?: string }) => (
+  default: ({ href, children, className }: { href: string; children: ReactNode; className?: string }) => (
     <a href={href} className={className}>
       {children}
     </a>
@@ -49,7 +50,7 @@ describe("RecentDocs", () => {
       }
     ];
 
-    render(<RecentDocs docs={docs} />);
+    renderWithClient(<RecentDocs initialDocs={docs} />);
 
     expect(screen.getByRole("link", { name: "good.pdf" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "bad.pdf" })).toBeInTheDocument();

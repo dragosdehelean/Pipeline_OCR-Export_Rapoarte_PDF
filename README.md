@@ -3,7 +3,7 @@
 Local-first Next.js app for PDF/DOCX upload, Docling conversion, strict quality gates, and Markdown/JSON exports.
 
 ## Prerequisites
-- Node.js 18+
+- Node.js 20.9+
 - Python 3.10+
 
 ## Setup (Windows-first)
@@ -55,3 +55,4 @@ python -m pytest -q --cov=services/docling_worker
 - `config/quality-gates.json` is the single source of truth for thresholds and limits.
 - All artifacts are stored under `data/` (gitignored).
 - `.env.local` stays local and is gitignored.
+- Client server-state is managed with TanStack Query.

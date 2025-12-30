@@ -1,14 +1,15 @@
-import fs from "fs/promises";
+import fs from "node:fs/promises";
 import { getJsonPath } from "../../../../../lib/storage";
 
 export const runtime = "nodejs";
 
 export async function GET(
   _req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: { id: string } | Promise<{ id: string }> }
 ) {
   try {
-    const raw = await fs.readFile(getJsonPath(params.id), "utf-8");
+    const { id } = await Promise.resolve(params);
+    const raw = await fs.readFile(getJsonPath(id), "utf-8");
     let content = raw;
     try {
       content = `${JSON.stringify(JSON.parse(raw), null, 2)}\n`;

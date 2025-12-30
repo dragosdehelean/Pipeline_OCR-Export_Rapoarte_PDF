@@ -1,5 +1,5 @@
 import { defineConfig } from "@playwright/test";
-import path from "path";
+import path from "node:path";
 
 const rootDir = process.cwd();
 const dataDir = process.env.DATA_DIR || path.join(rootDir, "data-test");

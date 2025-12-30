@@ -1,9 +1,6 @@
-import React from "react";
-import type { DocMeta } from "../lib/schema";
+import type { DocStatus } from "../lib/schema";
 
-type Status = DocMeta["status"];
-
-export function StatusBadge({ status }: { status: Status }) {
+export function StatusBadge({ status }: { status: DocStatus }) {
   const className = status === "SUCCESS" ? "success" : status === "FAILED" ? "failed" : "pending";
   return (
     <span className={`badge ${className}`}>

@@ -1,15 +1,12 @@
-import fs from "fs/promises";
-import path from "path";
-import { type DocMeta } from "./schema";
+import crypto from "node:crypto";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { docsIndexSchema, metaFileSchema, type DocMeta, type DocsIndex, type MetaFile } from "./schema";
 
 export type DocIndexEntry = DocMeta;
 
-type DocsIndex = {
-  docs: DocIndexEntry[];
-};
-
 export function getDataDir(): string {
-  const envDir = process.env.DATA_DIR || "./data";
+  const envDir = process.env.DATA_DIR ?? "./data";
   return path.resolve(process.cwd(), envDir);
 }
 
@@ -34,6 +31,10 @@ export function getMetaPath(id: string): string {
   return path.join(getDocExportDir(id), "meta.json");
 }
 
+export function getProgressPath(id: string): string {
+  return path.join(getDocExportDir(id), "progress.json");
+}
+
 export function getMarkdownPath(id: string): string {
   return path.join(getDocExportDir(id), "output.md");
 }
@@ -55,11 +56,11 @@ export async function readIndex(): Promise<DocsIndex> {
   const indexPath = getIndexPath();
   try {
     const raw = await fs.readFile(indexPath, "utf-8");
-    const parsed = JSON.parse(raw) as DocsIndex;
-    if (!parsed.docs) {
+    const parsed = docsIndexSchema.safeParse(JSON.parse(raw));
+    if (!parsed.success) {
       return { docs: [] };
     }
-    return parsed;
+    return parsed.data;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return { docs: [] };
@@ -89,15 +90,44 @@ export async function listDocs(limit = 50): Promise<DocIndexEntry[]> {
   return index.docs.slice(0, limit);
 }
 
-export async function readMetaFile(id: string): Promise<Record<string, unknown>> {
+export async function readMetaFile(id: string): Promise<MetaFile> {
   const raw = await fs.readFile(getMetaPath(id), "utf-8");
-  return JSON.parse(raw) as Record<string, unknown>;
+  const meta = metaFileSchema.parse(JSON.parse(raw));
+  try {
+    const progressRaw = await fs.readFile(getProgressPath(id), "utf-8");
+    const progress = JSON.parse(progressRaw);
+    if (isRecord(progress)) {
+      if (typeof progress.stage === "string") {
+        meta.processing.stage = progress.stage;
+      }
+      if (typeof progress.progress === "number") {
+        meta.processing.progress = progress.progress;
+      }
+      if (typeof progress.message === "string") {
+        meta.processing.message = progress.message;
+      }
+      if (typeof progress.requestId === "string") {
+        meta.processing.requestId = progress.requestId;
+        meta.requestId = progress.requestId;
+      }
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
+  return meta;
 }
 
 export async function writeJsonAtomic(filePath: string, value: unknown): Promise<void> {
   const dir = path.dirname(filePath);
   await fs.mkdir(dir, { recursive: true });
-  const tmpPath = `${filePath}.tmp`;
+  const unique = `${process.pid}-${Date.now()}-${crypto.randomUUID()}`;
+  const tmpPath = `${filePath}.${unique}.tmp`;
   await fs.writeFile(tmpPath, JSON.stringify(value, null, 2), "utf-8");
   await fs.rename(tmpPath, filePath);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

@@ -86,6 +86,16 @@ def clamp_tail(text: str, max_kb: int) -> str:
     return tail.decode("utf-8", errors="ignore")
 
 
+def emit_progress(stage: str, message: str, progress: int) -> None:
+    payload = {
+        "event": "progress",
+        "stage": stage,
+        "message": message,
+        "progress": progress,
+    }
+    print(json.dumps(payload), flush=True)
+
+
 def get_docling_version() -> str:
     try:
         import docling
@@ -166,13 +176,19 @@ def run_conversion(args: argparse.Namespace) -> int:
     try:
         from docling.document_converter import DocumentConverter
 
+        emit_progress("INIT", "Preparing conversion.", 5)
         converter = DocumentConverter()
+        emit_progress("CONVERT", "Converting document.", 25)
         result = converter.convert(args.input)
         document = result.document
+        emit_progress("EXPORT", "Exporting markdown.", 55)
         markdown = document.export_to_markdown()
+        emit_progress("EXPORT_JSON", "Exporting JSON.", 65)
         doc_dict = export_doc_to_dict(document)
 
+        emit_progress("METRICS", "Computing metrics.", 75)
         metrics = compute_metrics(document, markdown)
+        emit_progress("GATES", "Evaluating quality gates.", 85)
         gates_passed, failed, evaluated = evaluate_gates(metrics, config)
 
         max_pages = config.get("limits", {}).get("maxPages", 0)
@@ -197,6 +213,7 @@ def run_conversion(args: argparse.Namespace) -> int:
         meta["processing"]["status"] = status
 
         if gates_passed:
+            emit_progress("WRITE_OUTPUTS", "Writing outputs.", 92)
             md_path = os.path.join(export_dir, "output.md")
             json_path = os.path.join(export_dir, "output.json")
             with open(md_path, "w", encoding="utf-8") as handle:
@@ -224,6 +241,7 @@ def run_conversion(args: argparse.Namespace) -> int:
         meta["processing"]["status"] = "FAILED"
         meta["processing"]["exitCode"] = 1
         meta["logs"]["stderrTail"] = clamp_tail(str(exc), config["limits"]["stderrTailKb"])
+        emit_progress("FAILED", "Processing failed.", 100)
         end = time.time()
         meta["processing"]["finishedAt"] = now_iso()
         meta["processing"]["durationMs"] = int((end - start) * 1000)
@@ -234,6 +252,7 @@ def run_conversion(args: argparse.Namespace) -> int:
     meta["processing"]["finishedAt"] = now_iso()
     meta["processing"]["durationMs"] = int((end - start) * 1000)
 
+    emit_progress("DONE", "Processing complete.", 100)
     write_json(meta_path, meta)
     return 0
 
