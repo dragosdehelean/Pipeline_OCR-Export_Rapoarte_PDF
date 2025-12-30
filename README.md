@@ -12,11 +12,8 @@ Local-first Next.js app for PDF/DOCX upload, Docling conversion, strict quality 
 ```
 npm install
 ```
-2) Create Python venv and install worker deps:
-```
-python -m venv .venv
-.\.venv\Scripts\pip install -r services\docling_worker\requirements.txt
-```
+2) Set up the Python worker (uv):
+See the "Python worker (uv)" section below.
 3) Configure env:
 ```
 Copy-Item .env.local.example .env.local
@@ -31,6 +28,22 @@ Also set `DOCLING_WORKER` to `services/docling_worker/convert.py`.
 4) Run the app:
 ```
 npm run dev
+```
+
+## Python worker (uv)
+Install uv (once):
+```
+python -m pip install --user uv
+```
+Create a worker venv and sync deps:
+```
+cd services/docling_worker
+uv venv
+uv sync --group test
+```
+Run worker tests:
+```
+uv run pytest -q
 ```
 
 ## Scripts

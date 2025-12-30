@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "docling-worker"
+version = "0.1.0"
+description = "Docling worker for document ingestion and export."
+requires-python = ">=3.10"
+dependencies = [
+  "docling",
+  "reportlab",
+]
+
+[dependency-groups]
+test = [
+  "pytest",
+  "pytest-cov",
+]
+
+[tool.setuptools]
+py-modules = ["convert", "gates"]
