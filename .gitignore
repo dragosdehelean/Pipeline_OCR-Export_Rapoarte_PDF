@@ -41,6 +41,7 @@ tests/node/e2e/data-test/
 tmp/
 tmp-worker-test*/
 .next/
+.next-e2e/
 node_modules
 .env.local
 .env

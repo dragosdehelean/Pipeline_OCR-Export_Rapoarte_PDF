@@ -108,6 +108,7 @@ export async function POST(req: Request) {
 
   const id = generateDocId();
   const startedAt = new Date();
+  const stageTimer = createStageTimer("UPLOAD", startedAt.getTime());
 
   await ensureDataDirs();
   await fs.mkdir(getDocExportDir(id), { recursive: true });
@@ -190,6 +191,7 @@ export async function POST(req: Request) {
     message: "Starting worker.",
     requestId
   };
+  stageTimer.transition("SPAWN");
 
   await writeJsonAtomic(metaPath, meta);
   await upsertIndexDoc(toDocMeta(meta));
@@ -236,6 +238,9 @@ export async function POST(req: Request) {
       return;
     }
     meta = applyProgress(meta, update, progressState);
+    if (update.stage) {
+      stageTimer.transition(update.stage);
+    }
     const stageValue = (update.stage ?? "").toUpperCase();
     if (stageValue === "DONE" || stageValue === "FAILED") {
       allowProgressWrites = false;
@@ -264,6 +269,7 @@ export async function POST(req: Request) {
   })
     .then(async (result) => {
       allowProgressWrites = false;
+      const timings = stageTimer.finish();
       meta = await finalizeMeta({
         meta,
         metaPath,
@@ -277,6 +283,20 @@ export async function POST(req: Request) {
         timeoutSec,
         progressState
       });
+      const timingLog = formatStageTimingsLog({
+        docId: id,
+        requestId,
+        status: meta.processing.status,
+        timings
+      });
+      if (timingLog) {
+        console.info(timingLog);
+        meta = appendLogLineToMeta(
+          meta,
+          timingLog,
+          config.limits.stderrTailKb * 1024
+        );
+      }
       await scheduleFinalWrite(meta);
       await fs.rm(progressPath, { force: true });
       await upsertIndexDoc(toDocMeta(meta));
@@ -290,6 +310,20 @@ export async function POST(req: Request) {
         exitCode: -1,
         stderrTail: String(error)
       });
+      const timingLog = formatStageTimingsLog({
+        docId: id,
+        requestId,
+        status: meta.processing.status,
+        timings: stageTimer.finish()
+      });
+      if (timingLog) {
+        console.info(timingLog);
+        meta = appendLogLineToMeta(
+          meta,
+          timingLog,
+          config.limits.stderrTailKb * 1024
+        );
+      }
       await scheduleFinalWrite(meta);
       await fs.rm(progressPath, { force: true });
       await upsertIndexDoc(toDocMeta(meta));
@@ -377,6 +411,16 @@ type ProgressState = {
   stage: string;
   message: string;
   progress: number;
+};
+
+type StageTiming = {
+  stage: string;
+  durationMs: number;
+};
+
+type StageTimer = {
+  transition: (stage: string, atMs?: number) => void;
+  finish: (atMs?: number) => StageTiming[];
 };
 
 type FinalizeOptions = {
@@ -602,6 +646,80 @@ function resolveStartedAt(meta: MetaFile, fallback: Date) {
     }
   }
   return fallback;
+}
+
+function createStageTimer(initialStage: string, startedAtMs: number): StageTimer {
+  let currentStage = initialStage;
+  let currentStartedAt = startedAtMs;
+  const timings: StageTiming[] = [];
+
+  const recordStage = (atMs: number) => {
+    if (!currentStage) {
+      return;
+    }
+    const durationMs = Math.max(0, atMs - currentStartedAt);
+    timings.push({ stage: currentStage, durationMs });
+  };
+
+  return {
+    transition(stage, atMs = Date.now()) {
+      if (!stage || stage === currentStage) {
+        return;
+      }
+      recordStage(atMs);
+      currentStage = stage;
+      currentStartedAt = atMs;
+    },
+    finish(atMs = Date.now()) {
+      recordStage(atMs);
+      return timings;
+    }
+  };
+}
+
+function formatStageTimingsLog(options: {
+  docId: string;
+  requestId: string;
+  status: DocStatus;
+  timings: StageTiming[];
+}) {
+  const { docId, requestId, status, timings } = options;
+  if (!timings.length) {
+    return null;
+  }
+  const totalMs = timings.reduce((sum, item) => sum + item.durationMs, 0);
+  return JSON.stringify({
+    event: "stage_timings",
+    docId,
+    requestId,
+    status,
+    totalMs,
+    timings
+  });
+}
+
+function appendLogLineToMeta(meta: MetaFile, line: string, maxBytes: number): MetaFile {
+  const logs = meta.logs ?? { stdoutTail: "", stderrTail: "" };
+  return {
+    ...meta,
+    logs: {
+      ...logs,
+      stderrTail: appendLogLine(logs.stderrTail ?? "", line, maxBytes)
+    }
+  };
+}
+
+function appendLogLine(current: string, line: string, maxBytes: number) {
+  if (maxBytes <= 0) {
+    return "";
+  }
+  const separator = current && !current.endsWith("\n") ? "\n" : "";
+  const next = `${current}${separator}${line}`;
+  const encoded = Buffer.from(next, "utf-8");
+  if (encoded.length <= maxBytes) {
+    return next;
+  }
+  return encoded.subarray(encoded.length - maxBytes).toString("utf-8");
 }
 
 async function finalizeMeta(options: FinalizeOptions) {

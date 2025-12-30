@@ -18,7 +18,8 @@ See the "Python worker (uv)" section below.
 ```
 Copy-Item .env.local.example .env.local
 ```
-Edit `.env.local` and ensure `PYTHON_BIN` points to your venv python.
+Edit `.env.local` and ensure `PYTHON_BIN` points to your worker venv python
+(for uv: `services/docling_worker/.venv/Scripts/python` on Windows).
 On macOS/Linux:
 ```
 cp .env.local.example .env.local
