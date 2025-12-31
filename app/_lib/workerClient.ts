@@ -1,14 +1,22 @@
 /**
  * @fileoverview Manages a keep-warm Docling worker process using JSONL IPC.
  */
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import readline from "node:readline";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
 
 export type WorkerStatusSnapshot = {
   status: "stopped" | "starting" | "ready" | "error";
   pid: number | null;
   lastError: string | null;
   pythonStartupMs: number | null;
+  prewarm: WorkerPrewarmInfo | null;
+};
+
+export type WorkerPrewarmInfo = {
+  profile: string;
+  requestedDevice: string;
+  effectiveDevice: string;
+  cudaAvailable: boolean;
+  reason?: string;
 };
 
 export type WorkerProgressUpdate = {
@@ -23,6 +31,15 @@ export type WorkerJobResult = {
   stdoutTail: string;
   stderrTail: string;
   timedOut: boolean;
+  workerReused: boolean;
+  spawnedThisRequest: boolean;
+  pythonStartupMs: number | null;
+};
+
+export type WorkerStartupInfo = {
+  workerReused: boolean;
+  spawnedThisRequest: boolean;
+  pythonStartupMs: number | null;
 };
 
 /**
@@ -66,6 +83,9 @@ type WorkerJob = WorkerJobOptions & {
   stderrTail: TailBuffer;
   timedOut: boolean;
   timeoutHandle: NodeJS.Timeout | null;
+  workerReused: boolean;
+  spawnedThisRequest: boolean;
+  pythonStartupMs: number | null;
 };
 
 type TailBuffer = {
@@ -73,39 +93,91 @@ type TailBuffer = {
   toString: () => string;
 };
 
-let workerProcess: ChildProcessWithoutNullStreams | null = null;
-let workerStatus: WorkerStatusSnapshot = {
-  status: "stopped",
-  pid: null,
-  lastError: null,
-  pythonStartupMs: null
+type WorkerState = {
+  workerProcess: ChildProcessWithoutNullStreams | null;
+  workerStatus: WorkerStatusSnapshot;
+  workerKey: string;
+  lastStartOptions: { pythonBin: string; workerPath: string } | null;
+  lineReader: readline.Interface | null;
+  activeJob: WorkerJob | null;
+  jobQueue: WorkerJob[];
+  startPromise: Promise<WorkerStatusSnapshot> | null;
+  startResolve: ((value: WorkerStatusSnapshot) => void) | null;
+  startReject: ((error: WorkerJobError) => void) | null;
+  shutdownRegistered: boolean;
 };
-let workerKey = "";
-let lastStartOptions: { pythonBin: string; workerPath: string } | null = null;
-let lineReader: readline.Interface | null = null;
-let activeJob: WorkerJob | null = null;
-const jobQueue: WorkerJob[] = [];
+
+const getWorkerState = (): WorkerState => {
+  const globalState = globalThis as typeof globalThis & { __DOC_WORKER__?: WorkerState };
+  if (!globalState.__DOC_WORKER__) {
+    globalState.__DOC_WORKER__ = {
+      workerProcess: null,
+      workerStatus: {
+        status: "stopped",
+        pid: null,
+        lastError: null,
+        pythonStartupMs: null,
+        prewarm: null
+      },
+      workerKey: "",
+      lastStartOptions: null,
+      lineReader: null,
+      activeJob: null,
+      jobQueue: [],
+      startPromise: null,
+      startResolve: null,
+      startReject: null,
+      shutdownRegistered: false
+    };
+  }
+  return globalState.__DOC_WORKER__;
+};
+
+const state = getWorkerState();
+
+type WorkerDeps = {
+  spawn: typeof import("node:child_process").spawn;
+  readline: typeof import("node:readline");
+};
+
+let workerDepsPromise: Promise<WorkerDeps> | null = null;
+
+const loadWorkerDeps = async (): Promise<WorkerDeps> => {
+  if (!workerDepsPromise) {
+    workerDepsPromise = Promise.all([
+      import(/* webpackIgnore: true */ "node:child_process"),
+      import(/* webpackIgnore: true */ "node:readline")
+    ]).then(([childProcess, readline]) => ({
+      spawn: childProcess.spawn,
+      readline
+    }));
+  }
+  return workerDepsPromise;
+};
 
 /**
  * Returns a snapshot of the current worker status for health reporting.
  */
 export function getWorkerStatus(): WorkerStatusSnapshot {
-  return { ...workerStatus };
+  return { ...state.workerStatus };
 }
 
 /**
  * Enqueues a Docling job and resolves once the worker finishes processing.
  */
 export async function submitWorkerJob(options: WorkerJobOptions): Promise<WorkerJobResult> {
-  ensureWorker(options.pythonBin, options.workerPath);
-  return enqueueJob(options);
+  const startup = await ensureDoclingWorkerStarted({
+    pythonBin: options.pythonBin,
+    workerPath: options.workerPath
+  });
+  return enqueueJob({ ...options, ...startup });
 }
 
 /**
  * Shuts down the keep-warm worker process, if running.
  */
 export async function shutdownWorker(): Promise<void> {
-  const process = workerProcess;
+  const process = state.workerProcess;
   if (!process) {
     return;
   }
@@ -127,7 +199,116 @@ export async function shutdownWorker(): Promise<void> {
   });
 }
 
-const enqueueJob = (options: WorkerJobOptions): Promise<WorkerJobResult> =>
+/**
+ * Registers process signal handlers to stop the worker on shutdown.
+ */
+export function registerWorkerShutdownHandlers(): void {
+  if (state.shutdownRegistered) {
+    return;
+  }
+  state.shutdownRegistered = true;
+  const handleShutdown = () => {
+    void shutdownWorker();
+  };
+  process.once("SIGINT", handleShutdown);
+  process.once("SIGTERM", handleShutdown);
+}
+
+/**
+ * Ensures the worker process is running and ready for IPC.
+ */
+export async function ensureDoclingWorkerStarted(options: {
+  pythonBin: string;
+  workerPath: string;
+  timeoutMs?: number;
+}): Promise<WorkerStartupInfo> {
+  registerWorkerShutdownHandlers();
+  const { pythonBin, workerPath } = options;
+  const nextKey = `${pythonBin}::${workerPath}`;
+  const isReady =
+    state.workerProcess &&
+    state.workerKey === nextKey &&
+    state.workerStatus.status === "ready";
+  if (isReady) {
+    return {
+      workerReused: true,
+      spawnedThisRequest: false,
+      pythonStartupMs: null
+    };
+  }
+
+  const spawnedThisRequest = await ensureWorker(pythonBin, workerPath);
+  const startPromise = state.startPromise;
+  if (startPromise) {
+    const timeoutMs = options.timeoutMs ?? 30000;
+    await waitForWorkerReady(startPromise, timeoutMs);
+  }
+
+  return {
+    workerReused: !spawnedThisRequest,
+    spawnedThisRequest,
+    pythonStartupMs: spawnedThisRequest ? state.workerStatus.pythonStartupMs : null
+  };
+}
+
+const waitForWorkerReady = (
+  startPromise: Promise<WorkerStatusSnapshot>,
+  timeoutMs: number
+): Promise<WorkerStatusSnapshot> =>
+  new Promise((resolve, reject) => {
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      reject(
+        new WorkerJobError("WORKER_START_FAILED", "Worker did not become ready.")
+      );
+    }, timeoutMs);
+
+    startPromise
+      .then((status) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timeout);
+        resolve(status);
+      })
+      .catch((error) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timeout);
+        reject(error);
+      });
+  });
+
+const resolveStartPromise = () => {
+  if (!state.startResolve || !state.startPromise) {
+    return;
+  }
+  state.startResolve(state.workerStatus);
+  state.startPromise = null;
+  state.startResolve = null;
+  state.startReject = null;
+};
+
+const rejectStartPromise = (error: WorkerJobError) => {
+  if (!state.startReject || !state.startPromise) {
+    return;
+  }
+  state.startReject(error);
+  state.startPromise = null;
+  state.startResolve = null;
+  state.startReject = null;
+};
+
+const enqueueJob = (
+  options: WorkerJobOptions & WorkerStartupInfo
+): Promise<WorkerJobResult> =>
   new Promise((resolve, reject) => {
     const job: WorkerJob = {
       ...options,
@@ -138,85 +319,111 @@ const enqueueJob = (options: WorkerJobOptions): Promise<WorkerJobResult> =>
       timedOut: false,
       timeoutHandle: null
     };
-    jobQueue.push(job);
+    state.jobQueue.push(job);
     flushQueue();
   });
 
-const ensureWorker = (pythonBin: string, workerPath: string) => {
+const ensureWorker = async (pythonBin: string, workerPath: string) => {
   const nextKey = `${pythonBin}::${workerPath}`;
-  if (workerProcess && workerKey !== nextKey) {
+  if (state.workerProcess && state.workerKey !== nextKey) {
     void shutdownWorker();
   }
-  if (workerProcess) {
-    return;
+  if (state.workerProcess) {
+    return false;
   }
 
-  workerKey = nextKey;
-  lastStartOptions = { pythonBin, workerPath };
-  workerStatus = {
+  state.workerKey = nextKey;
+  state.lastStartOptions = { pythonBin, workerPath };
+  state.workerStatus = {
     status: "starting",
     pid: null,
     lastError: null,
-    pythonStartupMs: null
+    pythonStartupMs: null,
+    prewarm: null
   };
+  state.startPromise = new Promise((resolve, reject) => {
+    state.startResolve = resolve;
+    state.startReject = reject;
+  });
+
+  const { spawn, readline } = await loadWorkerDeps();
 
   try {
-    workerProcess = spawn(pythonBin, [workerPath, "--worker"], {
+    state.workerProcess = spawn(pythonBin, [workerPath, "--worker"], {
       env: process.env,
       stdio: ["pipe", "pipe", "pipe"]
     });
   } catch (error) {
-    workerStatus = {
+    state.workerStatus = {
       status: "error",
       pid: null,
       lastError: String(error),
-      pythonStartupMs: null
+      pythonStartupMs: null,
+      prewarm: null
     };
+    state.startReject?.(
+      new WorkerJobError("WORKER_START_FAILED", "Failed to start worker.")
+    );
+    state.startPromise = null;
+    state.startResolve = null;
+    state.startReject = null;
     throw new WorkerJobError("WORKER_START_FAILED", "Failed to start worker.");
   }
 
-  workerStatus.pid = workerProcess.pid ?? null;
-  attachListeners(workerProcess);
+  state.workerStatus.pid = state.workerProcess.pid ?? null;
+  attachListeners(state.workerProcess, readline);
+  return true;
 };
 
-const attachListeners = (process: ChildProcessWithoutNullStreams) => {
-  lineReader?.close();
-  lineReader = readline.createInterface({ input: process.stdout });
+const attachListeners = (
+  process: ChildProcessWithoutNullStreams,
+  readlineModule: WorkerDeps["readline"]
+) => {
+  state.lineReader?.close();
+  state.lineReader = readlineModule.createInterface({ input: process.stdout });
 
-  lineReader.on("line", (line) => {
+  state.lineReader.on("line", (line) => {
     handleWorkerLine(line);
   });
 
   process.stderr.on("data", (chunk: Buffer) => {
-    if (activeJob) {
-      activeJob.stderrTail.append(chunk);
+    if (state.activeJob) {
+      state.activeJob.stderrTail.append(chunk);
     }
   });
 
   process.on("error", (error) => {
-    workerStatus = {
+    state.workerStatus = {
       status: "error",
       pid: process.pid ?? null,
       lastError: String(error),
-      pythonStartupMs: workerStatus.pythonStartupMs
+      pythonStartupMs: state.workerStatus.pythonStartupMs,
+      prewarm: state.workerStatus.prewarm
     };
+    rejectStartPromise(
+      new WorkerJobError("WORKER_START_FAILED", "Worker failed to start.")
+    );
     failActiveJob("WORKER_START_FAILED", "Worker failed to start.");
     clearProcess();
-    restartIfQueued();
+    void restartIfQueued();
   });
 
   process.on("exit", () => {
-    if (workerStatus.status !== "error") {
-      workerStatus = {
+    if (state.workerStatus.status !== "error") {
+      state.workerStatus = {
         status: "stopped",
         pid: null,
-        lastError: workerStatus.lastError,
-        pythonStartupMs: workerStatus.pythonStartupMs
+        lastError: state.workerStatus.lastError,
+        pythonStartupMs: state.workerStatus.pythonStartupMs,
+        prewarm: state.workerStatus.prewarm
       };
     }
+    rejectStartPromise(
+      new WorkerJobError("WORKER_CRASHED", "Worker exited unexpectedly.")
+    );
     failActiveJob("WORKER_CRASHED", "Worker exited unexpectedly.");
     clearProcess();
-    restartIfQueued();
+    void restartIfQueued();
   });
 };
 
@@ -225,8 +432,8 @@ const handleWorkerLine = (line: string) => {
   if (!trimmed) {
     return;
   }
-  if (activeJob) {
-    activeJob.stdoutTail.append(`${trimmed}\n`);
+  if (state.activeJob) {
+    state.activeJob.stdoutTail.append(`${trimmed}\n`);
   }
   let payload: unknown;
   try {
@@ -241,18 +448,20 @@ const handleWorkerLine = (line: string) => {
   if (event === "ready") {
     const startupMs =
       typeof payload.pythonStartupMs === "number" ? payload.pythonStartupMs : null;
-    workerStatus = {
+    state.workerStatus = {
       status: "ready",
-      pid: workerProcess?.pid ?? null,
+      pid: state.workerProcess?.pid ?? null,
       lastError: null,
-      pythonStartupMs: startupMs
+      pythonStartupMs: startupMs,
+      prewarm: parsePrewarmInfo(payload.prewarm)
     };
+    resolveStartPromise();
     flushQueue();
     return;
   }
 
   const jobId = typeof payload.jobId === "string" ? payload.jobId : undefined;
-  const job = activeJob;
+  const job = state.activeJob;
   if (!job || (jobId && jobId !== job.docId)) {
     return;
   }
@@ -275,14 +484,14 @@ const handleWorkerLine = (line: string) => {
 };
 
 const flushQueue = () => {
-  if (!workerProcess || workerStatus.status !== "ready" || activeJob) {
+  if (!state.workerProcess || state.workerStatus.status !== "ready" || state.activeJob) {
     return;
   }
-  const next = jobQueue.shift();
+  const next = state.jobQueue.shift();
   if (!next) {
     return;
   }
-  activeJob = next;
+  state.activeJob = next;
   sendJob(next);
 };
 
@@ -290,8 +499,8 @@ const sendJob = (job: WorkerJob) => {
   const timeoutHandle = setTimeout(() => {
     job.timedOut = true;
     resolveActiveJob(-1, true);
-    if (workerProcess && !workerProcess.killed) {
-      workerProcess.kill("SIGKILL");
+    if (state.workerProcess && !state.workerProcess.killed) {
+      state.workerProcess.kill("SIGKILL");
     }
   }, job.timeoutMs);
   job.timeoutHandle = timeoutHandle;
@@ -309,21 +518,21 @@ const sendJob = (job: WorkerJob) => {
   };
 
   try {
-    workerProcess?.stdin.write(JSON.stringify(payload) + "\n");
+    state.workerProcess?.stdin.write(JSON.stringify(payload) + "\n");
   } catch (error) {
     clearTimeout(timeoutHandle);
     job.timeoutHandle = null;
     job.reject(new WorkerJobError("WORKER_PROTOCOL", "Failed to send job to worker."));
-    activeJob = null;
+    state.activeJob = null;
   }
 };
 
 const resolveActiveJob = (exitCode: number, timedOut = false) => {
-  if (!activeJob) {
+  if (!state.activeJob) {
     return;
   }
-  const job = activeJob;
-  activeJob = null;
+  const job = state.activeJob;
+  state.activeJob = null;
   if (job.timeoutHandle) {
     clearTimeout(job.timeoutHandle);
   }
@@ -331,7 +540,10 @@ const resolveActiveJob = (exitCode: number, timedOut = false) => {
     exitCode,
     stdoutTail: job.stdoutTail.toString(),
     stderrTail: job.stderrTail.toString(),
-    timedOut
+    timedOut,
+    workerReused: job.workerReused,
+    spawnedThisRequest: job.spawnedThisRequest,
+    pythonStartupMs: job.spawnedThisRequest ? state.workerStatus.pythonStartupMs : null
   });
   flushQueue();
 };
@@ -340,11 +552,11 @@ const failActiveJob = (
   code: WorkerJobError["code"],
   message: string
 ) => {
-  if (!activeJob) {
+  if (!state.activeJob) {
     return;
   }
-  const job = activeJob;
-  activeJob = null;
+  const job = state.activeJob;
+  state.activeJob = null;
   if (job.timeoutHandle) {
     clearTimeout(job.timeoutHandle);
   }
@@ -352,18 +564,21 @@ const failActiveJob = (
 };
 
 const clearProcess = () => {
-  lineReader?.close();
-  lineReader = null;
-  workerProcess = null;
-  workerKey = "";
+  state.lineReader?.close();
+  state.lineReader = null;
+  state.workerProcess = null;
+  state.workerKey = "";
 };
 
-const restartIfQueued = () => {
-  if (!jobQueue.length || !lastStartOptions) {
+const restartIfQueued = async () => {
+  if (!state.jobQueue.length || !state.lastStartOptions) {
     return;
   }
   try {
-    ensureWorker(lastStartOptions.pythonBin, lastStartOptions.workerPath);
+    await ensureWorker(
+      state.lastStartOptions.pythonBin,
+      state.lastStartOptions.workerPath
+    );
   } catch (error) {
     rejectQueuedJobs(
       new WorkerJobError("WORKER_START_FAILED", "Failed to restart worker.")
@@ -374,8 +589,8 @@ const restartIfQueued = () => {
 };
 
 const rejectQueuedJobs = (error: WorkerJobError) => {
-  while (jobQueue.length > 0) {
-    const job = jobQueue.shift();
+  while (state.jobQueue.length > 0) {
+    const job = state.jobQueue.shift();
     if (job) {
       job.reject(error);
     }
@@ -403,3 +618,26 @@ const createTailBuffer = (maxBytes: number): TailBuffer => {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+const parsePrewarmInfo = (value: unknown): WorkerPrewarmInfo | null => {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const profile = typeof value.profile === "string" ? value.profile : null;
+  const requestedDevice =
+    typeof value.requestedDevice === "string" ? value.requestedDevice : null;
+  const effectiveDevice =
+    typeof value.effectiveDevice === "string" ? value.effectiveDevice : null;
+  const cudaAvailable =
+    typeof value.cudaAvailable === "boolean" ? value.cudaAvailable : null;
+  if (!profile || !requestedDevice || !effectiveDevice || cudaAvailable === null) {
+    return null;
+  }
+  return {
+    profile,
+    requestedDevice,
+    effectiveDevice,
+    cudaAvailable,
+    reason: typeof value.reason === "string" ? value.reason : undefined
+  };
+};

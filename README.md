@@ -143,7 +143,7 @@ tests/node/e2e/data-test/  E2E data dir (gitignored)
 - All artifacts are stored under `data/` (gitignored).
 - `.env.local` stays local and is gitignored.
 - Client server-state is managed with TanStack Query.
-- The Python worker runs in keep-warm mode and is reported via `/api/health`.
+- The Python worker prewarms at server startup via Next.js instrumentation and shuts down with the server.
 - Tests live under `tests/` (`tests/node`, `tests/python`, `tests/fixtures`).
 - UX audit outputs live under `tests/node/e2e/ux-audit`.
 - Python coverage data is stored at `tests/python/.coverage` (gitignored) and configured via `tests/python/.coveragerc`.

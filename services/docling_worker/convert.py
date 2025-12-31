@@ -150,9 +150,24 @@ def emit_progress(
     emit_event(payload)
 
 
-def emit_ready(python_startup_ms: int) -> None:
+def emit_ready(
+    python_startup_ms: int,
+    settings: Optional[DoclingSettings] = None,
+) -> None:
     """Emits a ready event once the worker is warm."""
-    emit_event({"event": "ready", "pythonStartupMs": python_startup_ms})
+    payload: Dict[str, Any] = {"event": "ready", "pythonStartupMs": python_startup_ms}
+    if settings:
+        accelerator = settings.accelerator
+        prewarm_payload = {
+            "profile": settings.profile,
+            "requestedDevice": accelerator.requested_device,
+            "effectiveDevice": accelerator.effective_device,
+            "cudaAvailable": accelerator.cuda_available,
+        }
+        if accelerator.reason:
+            prewarm_payload["reason"] = accelerator.reason
+        payload["prewarm"] = prewarm_payload
+    emit_event(payload)
 
 
 def emit_result(job_id: str, exit_code: int, meta_path: str) -> None:
@@ -425,7 +440,10 @@ def get_converter_cache_stats() -> Dict[str, int]:
     return dict(CONVERTER_CACHE_STATS)
 
 
-def prewarm_converter_cache(docling_path: Optional[str], gates_path: Optional[str]) -> None:
+def prewarm_converter_cache(
+    docling_path: Optional[str],
+    gates_path: Optional[str],
+) -> Optional[DoclingSettings]:
     """Warms the converter cache with the default profile."""
     gates_config: Dict[str, Any] = {}
     if gates_path:
@@ -438,8 +456,10 @@ def prewarm_converter_cache(docling_path: Optional[str], gates_path: Optional[st
         docling_config = load_docling_config(docling_path, gates_config)
         settings = resolve_docling_settings(docling_config)
         get_cached_converter(settings)
+        return settings
     except Exception as exc:
         print(f"[worker] Converter prewarm failed: {exc}", file=sys.stderr)
+    return None
 
 
 def get_docling_converter(settings: DoclingSettings) -> Any:
@@ -855,12 +875,12 @@ def run_conversion(
 def run_worker_loop() -> int:
     """Runs a keep-warm worker that receives JSONL jobs over stdin."""
     get_docling_version()
-    prewarm_converter_cache(
+    prewarm_settings = prewarm_converter_cache(
         os.getenv("DOCLING_CONFIG_PATH"),
         os.getenv("GATES_CONFIG_PATH"),
     )
     python_startup_ms = int((time.perf_counter() - SCRIPT_START) * 1000)
-    emit_ready(python_startup_ms)
+    emit_ready(python_startup_ms, prewarm_settings)
 
     for line in sys.stdin:
         payload = line.strip()

@@ -308,7 +308,10 @@ export async function POST(req: Request) {
         docId: id,
         requestId,
         timings: meta.processing.timings,
-        accelerator: meta.processing.docling?.accelerator
+        accelerator: meta.processing.docling?.accelerator,
+        workerReused: result.workerReused,
+        spawnedThisRequest: result.spawnedThisRequest,
+        pythonStartupMs: result.pythonStartupMs
       });
       if (workerTimingLog) {
         console.info(workerTimingLog);
@@ -717,17 +720,34 @@ function formatWorkerTimingsLog(options: {
   requestId: string;
   timings: MetaFile["processing"]["timings"];
   accelerator?: string;
+  workerReused: boolean;
+  spawnedThisRequest: boolean;
+  pythonStartupMs: number | null;
 }) {
-  const { docId, requestId, timings, accelerator } = options;
+  const {
+    docId,
+    requestId,
+    timings,
+    accelerator,
+    workerReused,
+    spawnedThisRequest,
+    pythonStartupMs
+  } = options;
   if (!timings) {
     return null;
+  }
+  const nextTimings = { ...timings };
+  if (typeof pythonStartupMs === "number") {
+    nextTimings.pythonStartupMs = pythonStartupMs;
   }
   return JSON.stringify({
     event: "worker_stage_timings",
     docId,
     requestId,
-    timings,
-    accelerator
+    timings: nextTimings,
+    accelerator,
+    workerReused,
+    spawnedThisRequest
   });
 }
 
@@ -834,6 +854,17 @@ async function finalizeMeta(options: FinalizeOptions) {
   if (typeof processing.progress !== "number") {
     processing.progress = progressState.progress;
   }
+  const timings = {
+    ...(processing.timings ?? {})
+  };
+  if (result.spawnedThisRequest) {
+    if (typeof result.pythonStartupMs === "number") {
+      timings.pythonStartupMs = result.pythonStartupMs;
+    }
+  } else {
+    timings.pythonStartupMs = 0;
+  }
+  processing.timings = timings;
 
   const nextMeta: MetaFile = {
     ...meta,
