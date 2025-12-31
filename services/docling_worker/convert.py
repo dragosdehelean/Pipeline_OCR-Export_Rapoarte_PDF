@@ -24,6 +24,16 @@ CONVERTER_CACHE_STATS = {"builds": 0, "hits": 0}
 
 
 @dataclass(frozen=True)
+class AcceleratorSelection:
+    requested_device: str
+    effective_device: str
+    cuda_available: bool
+    reason: Optional[str] = None
+    torch_version: Optional[str] = None
+    torch_cuda_version: Optional[str] = None
+
+
+@dataclass(frozen=True)
 class DoclingSettings:
     profile: str
     pdf_backend: str
@@ -31,7 +41,7 @@ class DoclingSettings:
     do_table_structure: bool
     table_structure_mode: str
     document_timeout_sec: int
-    accelerator: str
+    accelerator: AcceleratorSelection
 
 
 @dataclass(frozen=True)
@@ -206,7 +216,11 @@ def build_legacy_docling_config(gates_config: Dict[str, Any]) -> Dict[str, Any]:
             }
         },
         "preflight": preflight_cfg,
-        "docling": {"accelerator": docling_cfg.get("accelerator", "auto")},
+        "docling": {
+            "accelerator": {
+                "defaultDevice": docling_cfg.get("accelerator", "auto")
+            }
+        },
     }
 
 
@@ -251,22 +265,45 @@ def resolve_profile_config(
     return profile, profile_cfg
 
 
-def resolve_requested_accelerator(docling_config: Dict[str, Any]) -> str:
-    """Resolves the accelerator from config/env overrides."""
-    requested = str(docling_config.get("docling", {}).get("accelerator", "auto"))
-    env_override = os.getenv("DOCLING_DEVICE")
-    if env_override and env_override.strip():
-        requested = env_override
-    return requested
+def normalize_device(value: Optional[str]) -> str:
+    """Normalizes accelerator device values to auto/cpu/cuda."""
+    normalized = str(value or "").lower().strip()
+    if normalized in {"cpu", "cuda"}:
+        return normalized
+    return "auto"
+
+
+def resolve_default_device(docling_config: Dict[str, Any]) -> str:
+    """Reads the default accelerator device from config."""
+    docling_section = docling_config.get("docling", {})
+    if isinstance(docling_section, dict):
+        accelerator = docling_section.get("accelerator")
+        if isinstance(accelerator, dict):
+            return normalize_device(accelerator.get("defaultDevice"))
+        if isinstance(accelerator, str):
+            return normalize_device(accelerator)
+    return "auto"
+
+
+def resolve_requested_device(
+    docling_config: Dict[str, Any],
+    device_override: Optional[str] = None,
+) -> str:
+    """Resolves the requested device from job overrides and config defaults."""
+    if device_override and str(device_override).strip():
+        return normalize_device(device_override)
+    return resolve_default_device(docling_config)
 
 
 def resolve_docling_settings(
     docling_config: Dict[str, Any],
     profile_override: Optional[str] = None,
+    device_override: Optional[str] = None,
 ) -> DoclingSettings:
     """Resolves Docling settings from the docling config."""
     profile, profile_cfg = resolve_profile_config(docling_config, profile_override)
-    accelerator = resolve_requested_accelerator(docling_config)
+    requested_device = resolve_requested_device(docling_config, device_override)
+    accelerator = select_accelerator(requested_device)
     return DoclingSettings(
         profile=profile,
         pdf_backend=str(profile_cfg.get("pdfBackend", "dlparse_v2")),
@@ -280,21 +317,44 @@ def resolve_docling_settings(
     )
 
 
-def resolve_accelerator_device(requested: str) -> str:
-    """Resolves the accelerator device string for meta reporting."""
-    requested = requested.lower().strip() if requested else "auto"
-    if requested != "auto":
-        return requested
+def get_torch_info() -> Tuple[bool, Optional[str], Optional[str], bool]:
+    """Returns torch availability, version, CUDA version, and CUDA availability."""
     try:
         import torch
 
-        if torch.cuda.is_available():
-            return "cuda"
-        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-            return "mps"
-        return "cpu"
+        return (
+            True,
+            getattr(torch, "__version__", None),
+            getattr(torch.version, "cuda", None),
+            bool(torch.cuda.is_available()),
+        )
     except Exception:
-        return "cpu"
+        return False, None, None, False
+
+
+def select_accelerator(requested: str) -> AcceleratorSelection:
+    """Selects the effective device based on torch availability."""
+    requested_device = normalize_device(requested)
+    torch_available, torch_version, torch_cuda_version, cuda_available = get_torch_info()
+    reason = None
+    if requested_device == "cuda":
+        if torch_available and cuda_available:
+            effective = "cuda"
+        else:
+            effective = "cpu"
+            reason = "CUDA_NOT_AVAILABLE"
+    elif requested_device == "cpu":
+        effective = "cpu"
+    else:
+        effective = "cuda" if cuda_available else "cpu"
+    return AcceleratorSelection(
+        requested_device=requested_device,
+        effective_device=effective,
+        cuda_available=cuda_available,
+        reason=reason,
+        torch_version=torch_version if torch_available else None,
+        torch_cuda_version=torch_cuda_version if torch_available else None,
+    )
 
 
 def resolve_pdf_backend_class(backend_name: str) -> Any:
@@ -336,7 +396,7 @@ def build_converter_cache_key(settings: DoclingSettings) -> str:
     return (
         f"{settings.profile}|{settings.pdf_backend}|{settings.do_ocr}|"
         f"{settings.do_table_structure}|{settings.table_structure_mode}|"
-        f"{settings.document_timeout_sec}|{settings.accelerator}"
+        f"{settings.document_timeout_sec}|{settings.accelerator.effective_device}"
     )
 
 
@@ -393,7 +453,7 @@ def get_docling_converter(settings: DoclingSettings) -> Any:
     )
     from docling.document_converter import DocumentConverter, PdfFormatOption
 
-    accelerator_device = resolve_accelerator_device(settings.accelerator)
+    accelerator_device = settings.accelerator.effective_device
     table_mode = resolve_table_structure_mode(settings.table_structure_mode)
     table_options = TableStructureOptions(
         mode=TableFormerMode.FAST if table_mode == "fast" else TableFormerMode.ACCURATE
@@ -549,13 +609,24 @@ def build_base_meta(
 ) -> Dict[str, Any]:
     """Builds the initial meta.json payload for a document."""
     size_bytes = os.path.getsize(input_path)
-    accelerator_device = resolve_accelerator_device(settings.accelerator)
+    accelerator = settings.accelerator
     timings = {
         "pythonStartupMs": python_startup_ms,
         "preflightMs": 0,
         "doclingConvertMs": 0,
         "exportMs": 0,
     }
+    accelerator_meta = {
+        "requestedDevice": accelerator.requested_device,
+        "effectiveDevice": accelerator.effective_device,
+        "cudaAvailable": accelerator.cuda_available,
+    }
+    if accelerator.reason:
+        accelerator_meta["reason"] = accelerator.reason
+    if accelerator.torch_version:
+        accelerator_meta["torchVersion"] = accelerator.torch_version
+    if accelerator.torch_cuda_version:
+        accelerator_meta["torchCudaVersion"] = accelerator.torch_cuda_version
     return {
         "schemaVersion": 1,
         "id": doc_id,
@@ -581,8 +652,9 @@ def build_base_meta(
                 "doTableStructure": settings.do_table_structure,
                 "tableStructureMode": settings.table_structure_mode,
                 "documentTimeoutSec": settings.document_timeout_sec,
-                "accelerator": accelerator_device,
+                "accelerator": accelerator.effective_device,
             },
+            "accelerator": accelerator_meta,
             "timings": timings,
             "worker": {
                 "pythonBin": sys.executable,
@@ -638,7 +710,10 @@ def run_conversion(
         getattr(args, "docling_config", None),
         config,
     )
-    settings = resolve_docling_settings(docling_config)
+    settings = resolve_docling_settings(
+        docling_config,
+        device_override=getattr(args, "device_override", None),
+    )
     export_dir = os.path.join(args.data_dir, "exports", args.doc_id)
     os.makedirs(export_dir, exist_ok=True)
     meta_path = os.path.join(export_dir, "meta.json")
@@ -808,6 +883,7 @@ def run_worker_loop() -> int:
         data_dir = message.get("dataDir")
         gates_path = message.get("gates")
         docling_config_path = message.get("doclingConfig")
+        device_override = message.get("deviceOverride")
         if (
             not job_id
             or not input_path
@@ -823,6 +899,7 @@ def run_worker_loop() -> int:
             data_dir=data_dir,
             gates=gates_path,
             docling_config=docling_config_path,
+            device_override=device_override,
         )
         exit_code = run_conversion(args, job_id=job_id, python_startup_ms=python_startup_ms)
         meta_path = os.path.join(data_dir, "exports", doc_id, "meta.json")
@@ -840,6 +917,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--data-dir")
     parser.add_argument("--gates")
     parser.add_argument("--docling-config")
+    parser.add_argument("--device-override")
     return parser
 
 

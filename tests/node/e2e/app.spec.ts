@@ -127,6 +127,44 @@ async function getTextChars(row: Locator) {
 }
 
 test.describe.serial("quality-critical e2e", () => {
+  test("advanced device override is sent", async ({ page }) => {
+    test.setTimeout(uploadTimeoutMs * 2);
+    await page.addInitScript(() => {
+      const entries: { name: string; value: string }[] = [];
+      const originalAppend = FormData.prototype.append;
+      FormData.prototype.append = function (
+        name: string,
+        value: string | Blob,
+        fileName?: string
+      ) {
+        entries.push({
+          name,
+          value: typeof value === "string" ? value : "FILE"
+        });
+        return originalAppend.call(this, name, value, fileName);
+      };
+      (window as Window & { __formDataEntries?: { name: string; value: string }[] })
+        .__formDataEntries = entries;
+    });
+    await gotoAndWaitForUploadReady(page);
+
+    await page.getByText("Advanced").click();
+    await page.selectOption("#device-override", "cpu");
+
+    await page.setInputFiles("input[type=file]", goodPdf);
+    await page.getByRole("button", { name: "Upload" }).click();
+
+    const formEntries = await page.evaluate(
+      () =>
+        (window as Window & { __formDataEntries?: { name: string; value: string }[] })
+          .__formDataEntries ?? []
+    );
+    const hasDeviceOverride = formEntries.some(
+      (entry) => entry.name === "deviceOverride" && entry.value === "cpu"
+    );
+    expect(hasDeviceOverride).toBeTruthy();
+  });
+
   test("upload good pdf -> SUCCESS -> exports present", async ({ page }) => {
     test.setTimeout(uploadTimeoutMs * 2);
     await page.addInitScript(() => {

@@ -26,6 +26,8 @@
     }
   },
   "docling": {
-    "accelerator": "auto"
+    "accelerator": {
+      "defaultDevice": "auto"
+    }
   }
 }

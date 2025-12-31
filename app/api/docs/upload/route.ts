@@ -75,6 +75,7 @@ export async function POST(req: Request) {
   }
 
   const file = formData.get("file");
+  const deviceOverride = parseDeviceOverride(formData.get("deviceOverride"));
 
   if (!isFileLike(file)) {
     return jsonError({
@@ -266,6 +267,7 @@ export async function POST(req: Request) {
     dataDir: getDataDir(),
     gatesPath: getGatesConfigPath(),
     doclingConfigPath: getDoclingConfigPath(),
+    deviceOverride,
     requestId,
     timeoutMs: timeoutSec * 1000,
     stdoutTailBytes: config.limits.stdoutTailKb * 1024,
@@ -636,6 +638,17 @@ function resolveExtension(extension: string, mimeType: string) {
     return ".docx";
   }
   return "";
+}
+
+function parseDeviceOverride(value: FormDataEntryValue | null) {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "auto" || normalized === "cpu" || normalized === "cuda") {
+    return normalized;
+  }
+  return null;
 }
 
 function resolveStartedAt(meta: MetaFile, fallback: Date) {

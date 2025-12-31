@@ -51,6 +51,7 @@ type WorkerJobOptions = {
   dataDir: string;
   gatesPath: string;
   doclingConfigPath: string;
+  deviceOverride?: string | null;
   requestId: string;
   timeoutMs: number;
   stdoutTailBytes: number;
@@ -303,6 +304,7 @@ const sendJob = (job: WorkerJob) => {
     dataDir: job.dataDir,
     gates: job.gatesPath,
     doclingConfig: job.doclingConfigPath,
+    deviceOverride: job.deviceOverride ?? undefined,
     requestId: job.requestId
   };
 

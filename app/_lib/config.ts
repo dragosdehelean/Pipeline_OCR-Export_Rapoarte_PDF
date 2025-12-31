@@ -83,7 +83,11 @@ export const doclingConfigSchema = z
       .strict(),
     docling: z
       .object({
-        accelerator: z.string()
+        accelerator: z
+          .object({
+            defaultDevice: z.string()
+          })
+          .strict()
       })
       .strict()
   })

@@ -96,47 +96,35 @@ def test_resolve_table_structure_mode_defaults():
     assert convert.resolve_table_structure_mode("unknown") == "fast"
 
 
-def test_resolve_accelerator_device_passthrough():
-    assert convert.resolve_accelerator_device("cpu") == "cpu"
+def test_resolve_requested_device_override():
+    config = {"docling": {"accelerator": {"defaultDevice": "auto"}}}
+    assert convert.resolve_requested_device(config, device_override="cpu") == "cpu"
 
 
-def test_resolve_requested_accelerator_env_override(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("DOCLING_DEVICE", "cuda")
-    config = {"docling": {"accelerator": "auto"}}
-    assert convert.resolve_requested_accelerator(config) == "cuda"
-
-
-def test_resolve_accelerator_device_auto_cuda(monkeypatch: pytest.MonkeyPatch):
+def test_select_accelerator_auto_cuda(monkeypatch: pytest.MonkeyPatch):
     class DummyCuda:
         @staticmethod
         def is_available():
             return True
 
-    class DummyBackends:
-        pass
-
-    dummy_torch = types.SimpleNamespace(cuda=DummyCuda(), backends=DummyBackends())
+    dummy_torch = types.SimpleNamespace(cuda=DummyCuda(), version=types.SimpleNamespace(cuda="12.8"))
     monkeypatch.setitem(sys.modules, "torch", dummy_torch)
-    assert convert.resolve_accelerator_device("auto") == "cuda"
+    selection = convert.select_accelerator("auto")
+    assert selection.effective_device == "cuda"
+    assert selection.cuda_available is True
 
 
-def test_resolve_accelerator_device_auto_mps(monkeypatch: pytest.MonkeyPatch):
+def test_select_accelerator_cuda_fallback(monkeypatch: pytest.MonkeyPatch):
     class DummyCuda:
         @staticmethod
         def is_available():
             return False
 
-    class DummyMps:
-        @staticmethod
-        def is_available():
-            return True
-
-    class DummyBackends:
-        mps = DummyMps()
-
-    dummy_torch = types.SimpleNamespace(cuda=DummyCuda(), backends=DummyBackends())
+    dummy_torch = types.SimpleNamespace(cuda=DummyCuda(), version=types.SimpleNamespace(cuda="12.8"))
     monkeypatch.setitem(sys.modules, "torch", dummy_torch)
-    assert convert.resolve_accelerator_device("auto") == "mps"
+    selection = convert.select_accelerator("cuda")
+    assert selection.effective_device == "cpu"
+    assert selection.reason == "CUDA_NOT_AVAILABLE"
 
 
 def test_resolve_docling_settings_from_config():
@@ -151,7 +139,7 @@ def test_resolve_docling_settings_from_config():
                 "documentTimeoutSec": 123,
             }
         },
-        "docling": {"accelerator": "cpu"},
+        "docling": {"accelerator": {"defaultDevice": "cpu"}},
     }
     settings = convert.resolve_docling_settings(config)
     assert settings.profile == "digital-balanced"
@@ -160,7 +148,39 @@ def test_resolve_docling_settings_from_config():
     assert settings.do_table_structure is True
     assert settings.table_structure_mode == "fast"
     assert settings.document_timeout_sec == 123
-    assert settings.accelerator == "cpu"
+    assert settings.accelerator.requested_device == "cpu"
+
+
+def test_build_converter_cache_key_uses_effective_device():
+    settings_cpu = convert.DoclingSettings(
+        profile="digital-fast",
+        pdf_backend="dlparse_v2",
+        do_ocr=False,
+        do_table_structure=False,
+        table_structure_mode="fast",
+        document_timeout_sec=0,
+        accelerator=convert.AcceleratorSelection(
+            requested_device="auto",
+            effective_device="cpu",
+            cuda_available=False,
+        ),
+    )
+    settings_cuda = convert.DoclingSettings(
+        profile="digital-fast",
+        pdf_backend="dlparse_v2",
+        do_ocr=False,
+        do_table_structure=False,
+        table_structure_mode="fast",
+        document_timeout_sec=0,
+        accelerator=convert.AcceleratorSelection(
+            requested_device="auto",
+            effective_device="cuda",
+            cuda_available=True,
+        ),
+    )
+    assert convert.build_converter_cache_key(settings_cpu) != convert.build_converter_cache_key(
+        settings_cuda
+    )
 
 
 def test_load_docling_config_uses_legacy_keys(tmp_path: Path):
@@ -269,7 +289,11 @@ def test_resolve_pdf_backend_class_and_converter(monkeypatch: pytest.MonkeyPatch
         do_table_structure=False,
         table_structure_mode="fast",
         document_timeout_sec=0,
-        accelerator="cpu",
+        accelerator=convert.AcceleratorSelection(
+            requested_device="cpu",
+            effective_device="cpu",
+            cuda_available=False,
+        ),
     )
     converter = convert.get_docling_converter(settings)
     assert isinstance(converter, DocumentConverter)

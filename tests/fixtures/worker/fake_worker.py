@@ -41,7 +41,11 @@ def load_docling_config(docling_path: str | None, gates_config: dict) -> dict:
                     "documentTimeoutSec": docling_cfg.get("documentTimeoutSec", 0),
                 }
             },
-            "docling": {"accelerator": docling_cfg.get("accelerator", "auto")},
+            "docling": {
+                "accelerator": {
+                    "defaultDevice": docling_cfg.get("accelerator", "auto")
+                }
+            },
             "preflight": gates_config.get("preflight", {}),
         }
     return {
@@ -56,9 +60,23 @@ def load_docling_config(docling_path: str | None, gates_config: dict) -> dict:
                 "documentTimeoutSec": 240,
             }
         },
-        "docling": {"accelerator": "auto"},
+        "docling": {"accelerator": {"defaultDevice": "auto"}},
         "preflight": {},
     }
+
+
+def resolve_default_device(docling_config: dict) -> str:
+    """Resolves the configured default accelerator device."""
+    docling_section = docling_config.get("docling", {})
+    if isinstance(docling_section, dict):
+        accelerator = docling_section.get("accelerator")
+        if isinstance(accelerator, dict):
+            value = accelerator.get("defaultDevice", "auto")
+        else:
+            value = accelerator
+    else:
+        value = "auto"
+    return str(value or "auto").strip().lower()
 
 
 def emit_event(payload: dict) -> None:
@@ -158,6 +176,7 @@ def run_job(
     gates_path: str,
     job_id: str,
     docling_config_path: str | None,
+    device_override: str | None,
 ) -> int:
     """Runs the fixture job to generate meta.json and outputs."""
     config = load_config(gates_path)
@@ -165,10 +184,20 @@ def run_job(
     default_profile = str(docling_config.get("defaultProfile", "digital-balanced"))
     profiles = docling_config.get("profiles", {})
     profile_cfg = profiles.get(default_profile, {})
-    accelerator = str(docling_config.get("docling", {}).get("accelerator", "auto"))
-    env_device = os.getenv("DOCLING_DEVICE")
-    if env_device and env_device.strip():
-        accelerator = env_device
+    requested_device = device_override or resolve_default_device(docling_config)
+    cuda_available = os.getenv("FAKE_CUDA_AVAILABLE", "").strip() == "1"
+    if requested_device == "cuda" and not cuda_available:
+        effective_device = "cpu"
+        fallback_reason = "CUDA_NOT_AVAILABLE"
+    elif requested_device == "cuda":
+        effective_device = "cuda"
+        fallback_reason = None
+    elif requested_device == "cpu":
+        effective_device = "cpu"
+        fallback_reason = None
+    else:
+        effective_device = "cuda" if cuda_available else "cpu"
+        fallback_reason = None
     export_dir = os.path.join(data_dir, "exports", doc_id)
     os.makedirs(export_dir, exist_ok=True)
     meta_path = os.path.join(export_dir, "meta.json")
@@ -282,7 +311,13 @@ def run_job(
                 "doTableStructure": profile_cfg.get("doTableStructure", False),
                 "tableStructureMode": profile_cfg.get("tableStructureMode", "fast"),
                 "documentTimeoutSec": profile_cfg.get("documentTimeoutSec", 0),
-                "accelerator": accelerator,
+                "accelerator": effective_device,
+            },
+            "accelerator": {
+                "requestedDevice": requested_device,
+                "effectiveDevice": effective_device,
+                "cudaAvailable": cuda_available,
+                **({"reason": fallback_reason} if fallback_reason else {}),
             },
             "timings": {
                 "pythonStartupMs": 1,
@@ -338,6 +373,7 @@ def run_worker_loop() -> int:
         data_dir = message.get("dataDir")
         gates_path = message.get("gates")
         docling_config_path = message.get("doclingConfig")
+        device_override = message.get("deviceOverride")
         if not job_id or not input_path or not doc_id or not data_dir or not gates_path:
             continue
         run_job(
@@ -347,6 +383,7 @@ def run_worker_loop() -> int:
             gates_path,
             job_id,
             docling_config_path,
+            device_override,
         )
         meta_path = os.path.join(data_dir, "exports", doc_id, "meta.json")
         emit_event({"event": "result", "jobId": job_id, "exitCode": 0, "metaPath": meta_path})
@@ -378,6 +415,7 @@ def main() -> int:
         args.gates,
         args.doc_id,
         args.docling_config,
+        None,
     )
 
 

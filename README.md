@@ -6,6 +6,7 @@ Local-first Next.js app for PDF/DOCX upload, Docling conversion, strict quality 
 ## Prerequisites
 - Node.js 20.9+
 - Python 3.10+
+- Optional GPU acceleration: NVIDIA CUDA drivers + CUDA-enabled PyTorch in the worker venv.
 
 ## Setup (Windows-first)
 1) Install Node dependencies:
@@ -113,7 +114,7 @@ python -m pytest -q --cov=services/docling_worker
 - `digital-fast` is available as a profile with table structure disabled.
 - Scan-like PDFs are rejected in a fast preflight step (no OCR fallback); tune thresholds under `preflight.pdfText` in `config/docling.json`.
 - Docling internal `document_timeout` is configured per profile under `documentTimeoutSec`.
-- Override the accelerator with `DOCLING_DEVICE=auto|cpu|cuda|mps` (default: auto).
+- Accelerator defaults live in `config/docling.json` under `docling.accelerator.defaultDevice` and can be overridden per upload in the UI Advanced panel.
 
 ## Project structure (current)
 ```

@@ -75,6 +75,17 @@ export const processingDoclingSchema = z
   })
   .strict();
 
+export const processingAcceleratorSchema = z
+  .object({
+    requestedDevice: z.string(),
+    effectiveDevice: z.string(),
+    cudaAvailable: z.boolean(),
+    reason: z.string().optional(),
+    torchVersion: z.string().optional(),
+    torchCudaVersion: z.string().optional()
+  })
+  .strict();
+
 export const processingPreflightSchema = z
   .object({
     passed: z.boolean(),
@@ -110,6 +121,7 @@ export const metaProcessingSchema = z
     profile: z.string().optional(),
     failure: processingFailureSchema.optional(),
     docling: processingDoclingSchema.optional(),
+    accelerator: processingAcceleratorSchema.optional(),
     preflight: processingPreflightSchema.optional(),
     timings: processingTimingsSchema.optional(),
     worker: z
