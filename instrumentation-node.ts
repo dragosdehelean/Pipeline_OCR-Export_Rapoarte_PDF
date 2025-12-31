@@ -3,9 +3,8 @@
  */
 import { getMissingEnv, getResolvedRuntimeEnv } from "./app/_lib/env";
 import {
-  ensureDoclingWorkerStarted,
   getWorkerStatus,
-  registerWorkerShutdownHandlers
+  prewarmWorker
 } from "./app/_lib/workerClient";
 
 export async function prewarmDoclingWorker() {
@@ -23,10 +22,8 @@ export async function prewarmDoclingWorker() {
     return;
   }
 
-  registerWorkerShutdownHandlers();
-
   try {
-    await ensureDoclingWorkerStarted({
+    await prewarmWorker({
       pythonBin: resolved.PYTHON_BIN,
       workerPath: resolved.DOCLING_WORKER,
       timeoutMs: 30000

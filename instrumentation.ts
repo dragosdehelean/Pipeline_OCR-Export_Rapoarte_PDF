@@ -6,7 +6,7 @@ export async function register() {
     return;
   }
   const { prewarmDoclingWorker } = await import("./instrumentation-node");
-  await prewarmDoclingWorker();
+  void prewarmDoclingWorker();
 }
 
 export const runtime = "nodejs";

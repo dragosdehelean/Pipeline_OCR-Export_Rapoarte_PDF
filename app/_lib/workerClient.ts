@@ -36,9 +36,13 @@ export type WorkerJobResult = {
   pythonStartupMs: number | null;
 };
 
-export type WorkerStartupInfo = {
+/**
+ * Describes a ready worker handle alongside spawn context.
+ */
+export type WorkerHandle = {
+  worker: ChildProcessWithoutNullStreams;
   workerReused: boolean;
-  spawnedThisRequest: boolean;
+  spawnedThisCall: boolean;
   pythonStartupMs: number | null;
 };
 
@@ -74,6 +78,18 @@ type WorkerJobOptions = {
   stdoutTailBytes: number;
   stderrTailBytes: number;
   onProgress?: (update: WorkerProgressUpdate) => void;
+};
+
+type WorkerStartOptions = {
+  pythonBin: string;
+  workerPath: string;
+  timeoutMs?: number;
+};
+
+type WorkerJobStartup = {
+  workerReused: boolean;
+  spawnedThisRequest: boolean;
+  pythonStartupMs: number | null;
 };
 
 type WorkerJob = WorkerJobOptions & {
@@ -141,6 +157,7 @@ type WorkerDeps = {
 };
 
 let workerDepsPromise: Promise<WorkerDeps> | null = null;
+const DEFAULT_STARTUP_TIMEOUT_MS = 30000;
 
 const loadWorkerDeps = async (): Promise<WorkerDeps> => {
   if (!workerDepsPromise) {
@@ -163,14 +180,70 @@ export function getWorkerStatus(): WorkerStatusSnapshot {
 }
 
 /**
+ * Starts the Docling worker in advance to avoid per-request spawn costs.
+ */
+export async function prewarmWorker(options: WorkerStartOptions): Promise<void> {
+  await getWorker(options);
+}
+
+/**
+ * Returns a ready worker handle with spawn context for telemetry.
+ */
+export async function getWorker(options: WorkerStartOptions): Promise<WorkerHandle> {
+  registerWorkerShutdownHandlers();
+  const { pythonBin, workerPath } = options;
+  const nextKey = `${pythonBin}::${workerPath}`;
+  const isReady =
+    state.workerProcess &&
+    state.workerKey === nextKey &&
+    state.workerStatus.status === "ready";
+  if (isReady && state.workerProcess) {
+    return {
+      worker: state.workerProcess,
+      workerReused: true,
+      spawnedThisCall: false,
+      pythonStartupMs: null
+    };
+  }
+
+  const spawnedThisCall = await startWorkerIfNeeded(pythonBin, workerPath);
+  const startPromise = state.startPromise;
+  if (startPromise) {
+    const timeoutMs = options.timeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS;
+    await waitForWorkerReady(startPromise, timeoutMs);
+  } else if (state.workerStatus.status !== "ready") {
+    throw new WorkerJobError(
+      "WORKER_START_FAILED",
+      "Worker did not become ready."
+    );
+  }
+
+  if (!state.workerProcess) {
+    throw new WorkerJobError("WORKER_START_FAILED", "Worker is not available.");
+  }
+
+  return {
+    worker: state.workerProcess,
+    workerReused: !spawnedThisCall,
+    spawnedThisCall,
+    pythonStartupMs: spawnedThisCall ? state.workerStatus.pythonStartupMs : null
+  };
+}
+
+/**
  * Enqueues a Docling job and resolves once the worker finishes processing.
  */
 export async function submitWorkerJob(options: WorkerJobOptions): Promise<WorkerJobResult> {
-  const startup = await ensureDoclingWorkerStarted({
+  const startup = await getWorker({
     pythonBin: options.pythonBin,
     workerPath: options.workerPath
   });
-  return enqueueJob({ ...options, ...startup });
+  return enqueueJob({
+    ...options,
+    workerReused: startup.workerReused,
+    spawnedThisRequest: startup.spawnedThisCall,
+    pythonStartupMs: startup.pythonStartupMs
+  });
 }
 
 /**
@@ -212,44 +285,9 @@ export function registerWorkerShutdownHandlers(): void {
   };
   process.once("SIGINT", handleShutdown);
   process.once("SIGTERM", handleShutdown);
+  process.once("beforeExit", handleShutdown);
 }
 
-/**
- * Ensures the worker process is running and ready for IPC.
- */
-export async function ensureDoclingWorkerStarted(options: {
-  pythonBin: string;
-  workerPath: string;
-  timeoutMs?: number;
-}): Promise<WorkerStartupInfo> {
-  registerWorkerShutdownHandlers();
-  const { pythonBin, workerPath } = options;
-  const nextKey = `${pythonBin}::${workerPath}`;
-  const isReady =
-    state.workerProcess &&
-    state.workerKey === nextKey &&
-    state.workerStatus.status === "ready";
-  if (isReady) {
-    return {
-      workerReused: true,
-      spawnedThisRequest: false,
-      pythonStartupMs: null
-    };
-  }
-
-  const spawnedThisRequest = await ensureWorker(pythonBin, workerPath);
-  const startPromise = state.startPromise;
-  if (startPromise) {
-    const timeoutMs = options.timeoutMs ?? 30000;
-    await waitForWorkerReady(startPromise, timeoutMs);
-  }
-
-  return {
-    workerReused: !spawnedThisRequest,
-    spawnedThisRequest,
-    pythonStartupMs: spawnedThisRequest ? state.workerStatus.pythonStartupMs : null
-  };
-}
 
 const waitForWorkerReady = (
   startPromise: Promise<WorkerStatusSnapshot>,
@@ -306,9 +344,7 @@ const rejectStartPromise = (error: WorkerJobError) => {
   state.startReject = null;
 };
 
-const enqueueJob = (
-  options: WorkerJobOptions & WorkerStartupInfo
-): Promise<WorkerJobResult> =>
+const enqueueJob = (options: WorkerJobOptions & WorkerJobStartup): Promise<WorkerJobResult> =>
   new Promise((resolve, reject) => {
     const job: WorkerJob = {
       ...options,
@@ -323,12 +359,18 @@ const enqueueJob = (
     flushQueue();
   });
 
-const ensureWorker = async (pythonBin: string, workerPath: string) => {
+const startWorkerIfNeeded = async (
+  pythonBin: string,
+  workerPath: string
+): Promise<boolean> => {
   const nextKey = `${pythonBin}::${workerPath}`;
   if (state.workerProcess && state.workerKey !== nextKey) {
-    void shutdownWorker();
+    await shutdownWorker();
   }
   if (state.workerProcess) {
+    return false;
+  }
+  if (state.startPromise && state.workerKey === nextKey) {
     return false;
   }
 
@@ -543,7 +585,7 @@ const resolveActiveJob = (exitCode: number, timedOut = false) => {
     timedOut,
     workerReused: job.workerReused,
     spawnedThisRequest: job.spawnedThisRequest,
-    pythonStartupMs: job.spawnedThisRequest ? state.workerStatus.pythonStartupMs : null
+    pythonStartupMs: job.spawnedThisRequest ? job.pythonStartupMs : null
   });
   flushQueue();
 };
@@ -575,7 +617,7 @@ const restartIfQueued = async () => {
     return;
   }
   try {
-    await ensureWorker(
+    await startWorkerIfNeeded(
       state.lastStartOptions.pythonBin,
       state.lastStartOptions.workerPath
     );

@@ -276,7 +276,10 @@ export async function POST(req: Request) {
   })
     .then(async (result) => {
       allowProgressWrites = false;
-      const timings = stageTimer.finish();
+      const timings = normalizeStageTimings(
+        stageTimer.finish(),
+        result.spawnedThisRequest
+      );
       meta = await finalizeMeta({
         meta,
         metaPath,
@@ -308,7 +311,7 @@ export async function POST(req: Request) {
         docId: id,
         requestId,
         timings: meta.processing.timings,
-        accelerator: meta.processing.docling?.accelerator,
+        accelerator: meta.processing.accelerator,
         workerReused: result.workerReused,
         spawnedThisRequest: result.spawnedThisRequest,
         pythonStartupMs: result.pythonStartupMs
@@ -715,11 +718,26 @@ function formatStageTimingsLog(options: {
   });
 }
 
+function normalizeStageTimings(
+  timings: StageTiming[],
+  spawnedThisRequest: boolean
+): StageTiming[] {
+  if (spawnedThisRequest) {
+    return timings;
+  }
+  return timings.map((item) => {
+    if (item.stage.toUpperCase() !== "SPAWN") {
+      return item;
+    }
+    return { ...item, durationMs: 0 };
+  });
+}
+
 function formatWorkerTimingsLog(options: {
   docId: string;
   requestId: string;
   timings: MetaFile["processing"]["timings"];
-  accelerator?: string;
+  accelerator?: MetaFile["processing"]["accelerator"];
   workerReused: boolean;
   spawnedThisRequest: boolean;
   pythonStartupMs: number | null;
@@ -737,15 +755,19 @@ function formatWorkerTimingsLog(options: {
     return null;
   }
   const nextTimings = { ...timings };
-  if (typeof pythonStartupMs === "number") {
-    nextTimings.pythonStartupMs = pythonStartupMs;
+  const safeStartupMs = workerReused ? 0 : pythonStartupMs;
+  if (typeof safeStartupMs === "number") {
+    nextTimings.pythonStartupMs = safeStartupMs;
   }
+  const acceleratorRequested = accelerator?.requestedDevice;
+  const acceleratorEffective = accelerator?.effectiveDevice;
   return JSON.stringify({
     event: "worker_stage_timings",
     docId,
     requestId,
     timings: nextTimings,
-    accelerator,
+    acceleratorRequested,
+    acceleratorEffective,
     workerReused,
     spawnedThisRequest
   });
@@ -857,10 +879,9 @@ async function finalizeMeta(options: FinalizeOptions) {
   const timings = {
     ...(processing.timings ?? {})
   };
-  if (result.spawnedThisRequest) {
-    if (typeof result.pythonStartupMs === "number") {
-      timings.pythonStartupMs = result.pythonStartupMs;
-    }
+  const spawnedThisRequest = result.spawnedThisRequest && !result.workerReused;
+  if (spawnedThisRequest && typeof result.pythonStartupMs === "number") {
+    timings.pythonStartupMs = result.pythonStartupMs;
   } else {
     timings.pythonStartupMs = 0;
   }
