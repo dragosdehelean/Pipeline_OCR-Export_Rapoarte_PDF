@@ -1,6 +1,5 @@
 """Runtime tests for docling conversion helpers and CLI flow."""
 import json
-import sys
 import types
 from pathlib import Path
 
@@ -10,10 +9,16 @@ from services.docling_worker import convert
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 CONFIG_PATH = ROOT_DIR / "config" / "quality-gates.json"
+DOCLING_CONFIG_PATH = ROOT_DIR / "config" / "docling.json"
 
 
 def load_repo_config() -> dict:
     with CONFIG_PATH.open("r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def load_docling_config() -> dict:
+    with DOCLING_CONFIG_PATH.open("r", encoding="utf-8") as handle:
         return json.load(handle)
 
 
@@ -115,7 +120,8 @@ def test_build_base_meta(tmp_path: Path):
     file_path = tmp_path / "input.pdf"
     file_path.write_text("fixture", encoding="utf-8")
     config = load_repo_config()
-    meta = convert.build_base_meta("doc-1", str(file_path), config)
+    settings = convert.resolve_docling_settings(load_docling_config())
+    meta = convert.build_base_meta("doc-1", str(file_path), config, settings, 0)
 
     assert meta["id"] == "doc-1"
     assert meta["processing"]["status"] == "PENDING"
@@ -132,6 +138,106 @@ def test_write_json(tmp_path: Path):
 
 
 def test_run_conversion_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    convert.reset_converter_cache()
+    config = load_repo_config()
+    required = required_metrics(config)
+    pages = int(max(required.get("pages", 1), 1))
+    min_chars = int(
+        max(
+            required.get("textChars", 0),
+            required.get("textCharsPerPageAvg", 0) * pages,
+            0,
+        )
+    )
+    min_words = int(max(required.get("textItems", 0), 0))
+    min_md_chars = int(max(required.get("mdChars", 0), 0))
+    tables_required = int(max(required.get("tables", 0), 0))
+
+    text_body = build_text(min_chars, min_words)
+    markdown = build_markdown(min_md_chars)
+    tables = [object() for _ in range(max(tables_required, 0))]
+
+    class DummyText:
+        def __init__(self, text: str):
+            self.text = text
+
+    class DummyDocument:
+        def __init__(self):
+            self.num_pages = pages
+            self.texts = [DummyText(text_body)]
+            self.tables = tables
+
+        def export_to_markdown(self):
+            return markdown
+
+        def export_to_dict(self):
+            return {"ok": True}
+
+    class DummyResult:
+        def __init__(self):
+            self.document = DummyDocument()
+
+    class DummyConverter:
+        def convert(self, path: str):
+            return DummyResult()
+        def __init__(self):
+            pass
+
+    monkeypatch.setattr(convert, "get_docling_converter", lambda settings: DummyConverter())
+
+    input_path = tmp_path / "input.pdf"
+    input_path.write_text("fixture", encoding="utf-8")
+
+    args = types.SimpleNamespace(
+        input=str(input_path),
+        doc_id="doc-123",
+        data_dir=str(tmp_path),
+        gates=str(CONFIG_PATH),
+        docling_config=str(DOCLING_CONFIG_PATH),
+    )
+
+    exit_code = convert.run_conversion(args)
+    assert exit_code == 0
+
+    meta_path = tmp_path / "exports" / "doc-123" / "meta.json"
+    assert meta_path.exists()
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert meta["processing"]["status"] == "SUCCESS"
+    assert meta["outputs"]["markdownPath"] is not None
+    assert meta["outputs"]["jsonPath"] is not None
+
+
+def test_preflight_rejects_scan_like_pdf(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    convert.reset_converter_cache()
+    input_path = ROOT_DIR / "tests" / "fixtures" / "docs" / "scan_like_no_text.pdf"
+
+    monkeypatch.setattr(
+        convert,
+        "get_docling_converter",
+        lambda settings: (_ for _ in ()).throw(AssertionError("converter should not run")),
+    )
+
+    args = types.SimpleNamespace(
+        input=str(input_path),
+        doc_id="doc-preflight",
+        data_dir=str(tmp_path),
+        gates=str(CONFIG_PATH),
+        docling_config=str(DOCLING_CONFIG_PATH),
+    )
+
+    exit_code = convert.run_conversion(args)
+    assert exit_code != 0
+
+    meta_path = tmp_path / "exports" / "doc-preflight" / "meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert meta["processing"]["status"] == "FAILED"
+    assert meta["processing"]["selectedProfile"] == "rejected-no-text"
+    assert meta["processing"]["failure"]["code"] == "NO_TEXT_LAYER"
+    assert meta["processing"]["preflight"]["passed"] is False
+
+
+def test_preflight_allows_digital_pdf(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    convert.reset_converter_cache()
     config = load_repo_config()
     required = required_metrics(config)
     pages = int(max(required.get("pages", 1), 1))
@@ -174,36 +280,100 @@ def test_run_conversion_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         def convert(self, path: str):
             return DummyResult()
 
-    dummy_docling = types.ModuleType("docling")
-    dummy_converter = types.ModuleType("docling.document_converter")
-    dummy_converter.DocumentConverter = DummyConverter
-    monkeypatch.setitem(sys.modules, "docling", dummy_docling)
-    monkeypatch.setitem(sys.modules, "docling.document_converter", dummy_converter)
+    monkeypatch.setattr(convert, "get_docling_converter", lambda settings: DummyConverter())
 
-    input_path = tmp_path / "input.pdf"
-    input_path.write_text("fixture", encoding="utf-8")
-
+    input_path = ROOT_DIR / "tests" / "fixtures" / "docs" / "short_valid_text.pdf"
     args = types.SimpleNamespace(
         input=str(input_path),
-        doc_id="doc-123",
+        doc_id="doc-digital",
         data_dir=str(tmp_path),
         gates=str(CONFIG_PATH),
+        docling_config=str(DOCLING_CONFIG_PATH),
     )
 
     exit_code = convert.run_conversion(args)
     assert exit_code == 0
 
-    meta_path = tmp_path / "exports" / "doc-123" / "meta.json"
-    assert meta_path.exists()
+    meta_path = tmp_path / "exports" / "doc-digital" / "meta.json"
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
     assert meta["processing"]["status"] == "SUCCESS"
-    assert meta["outputs"]["markdownPath"] is not None
-    assert meta["outputs"]["jsonPath"] is not None
+    assert meta["processing"]["selectedProfile"] == "digital-balanced"
+    assert meta["processing"]["docling"]["doOcr"] is False
+    assert meta["processing"]["docling"]["doTableStructure"] is True
+    assert meta["processing"]["docling"]["pdfBackend"] == "dlparse_v2"
+    assert meta["processing"]["docling"]["tableStructureMode"] == "fast"
+
+
+def test_run_conversion_fails_max_pages(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    convert.reset_converter_cache()
+    config = load_repo_config()
+    max_pages = int(config.get("limits", {}).get("maxPages", 1))
+    pages = max_pages + 1
+
+    min_chars = int(
+        max(
+            config.get("quality", {}).get("minTextChars", 0),
+            config.get("quality", {}).get("minTextCharsPerPageAvg", 0) * pages,
+        )
+    )
+    min_words = int(max(config.get("quality", {}).get("minTextItems", 0), 0))
+    min_md_chars = int(max(config.get("quality", {}).get("minMarkdownChars", 0), 0))
+
+    text_body = build_text(min_chars, min_words)
+    markdown = build_markdown(min_md_chars)
+
+    class DummyText:
+        def __init__(self, text: str):
+            self.text = text
+
+    class DummyDocument:
+        def __init__(self):
+            self.num_pages = pages
+            self.texts = [DummyText(text_body)]
+            self.tables = []
+
+        def export_to_markdown(self):
+            return markdown
+
+        def export_to_dict(self):
+            return {"ok": True}
+
+    class DummyResult:
+        def __init__(self):
+            self.document = DummyDocument()
+
+    class DummyConverter:
+        def convert(self, path: str):
+            return DummyResult()
+
+    monkeypatch.setattr(convert, "get_docling_converter", lambda settings: DummyConverter())
+
+    input_path = ROOT_DIR / "tests" / "fixtures" / "docs" / "short_valid_text.pdf"
+    args = types.SimpleNamespace(
+        input=str(input_path),
+        doc_id="doc-max-pages",
+        data_dir=str(tmp_path),
+        gates=str(CONFIG_PATH),
+        docling_config=str(DOCLING_CONFIG_PATH),
+    )
+
+    exit_code = convert.run_conversion(args)
+    assert exit_code == 0
+
+    meta_path = tmp_path / "exports" / "doc-max-pages" / "meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert meta["processing"]["status"] == "FAILED"
+    assert meta["outputs"]["markdownPath"] is None
+    assert any(gate["code"] == "LIMIT_MAX_PAGES" for gate in meta["qualityGates"]["failedGates"])
 
 
 def test_run_conversion_failure_without_docling(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.delitem(sys.modules, "docling", raising=False)
-    monkeypatch.delitem(sys.modules, "docling.document_converter", raising=False)
+    convert.reset_converter_cache()
+    monkeypatch.setattr(
+        convert,
+        "get_docling_converter",
+        lambda settings: (_ for _ in ()).throw(RuntimeError("docling missing")),
+    )
 
     input_path = tmp_path / "input.pdf"
     input_path.write_text("fixture", encoding="utf-8")
@@ -213,6 +383,7 @@ def test_run_conversion_failure_without_docling(tmp_path: Path, monkeypatch: pyt
         doc_id="doc-err",
         data_dir=str(tmp_path),
         gates=str(CONFIG_PATH),
+        docling_config=str(DOCLING_CONFIG_PATH),
     )
 
     exit_code = convert.run_conversion(args)
@@ -223,3 +394,64 @@ def test_run_conversion_failure_without_docling(tmp_path: Path, monkeypatch: pyt
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
     assert meta["processing"]["status"] == "FAILED"
     assert meta["logs"]["stderrTail"]
+
+
+def test_converter_cache_reuses_pipeline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    convert.reset_converter_cache()
+    build_calls = 0
+
+    class DummyText:
+        def __init__(self, text: str):
+            self.text = text
+
+    class DummyDocument:
+        def __init__(self):
+            self.num_pages = 1
+            self.texts = [DummyText("hello world")]
+            self.tables = []
+
+        def export_to_markdown(self):
+            return "# ok"
+
+        def export_to_dict(self):
+            return {"ok": True}
+
+    class DummyResult:
+        def __init__(self):
+            self.document = DummyDocument()
+
+    class DummyConverter:
+        def convert(self, path: str):
+            return DummyResult()
+
+    def fake_get_docling_converter(settings):
+        nonlocal build_calls
+        build_calls += 1
+        return DummyConverter()
+
+    monkeypatch.setattr(convert, "get_docling_converter", fake_get_docling_converter)
+    monkeypatch.setattr(
+        convert,
+        "run_pdf_preflight",
+        lambda *_: convert.PreflightResult(True, 0, 0, 0),
+    )
+    monkeypatch.setattr(convert, "evaluate_gates", lambda *_: (True, [], []))
+
+    input_path = tmp_path / "input.pdf"
+    input_path.write_text("%PDF-1.4", encoding="utf-8")
+
+    args_base = {
+        "input": str(input_path),
+        "data_dir": str(tmp_path),
+        "gates": str(CONFIG_PATH),
+        "docling_config": str(DOCLING_CONFIG_PATH),
+    }
+
+    args_first = types.SimpleNamespace(doc_id="doc-cache-1", **args_base)
+    args_second = types.SimpleNamespace(doc_id="doc-cache-2", **args_base)
+
+    assert convert.run_conversion(args_first) == 0
+    assert convert.run_conversion(args_second) == 0
+    assert build_calls == 1
+    stats = convert.get_converter_cache_stats()
+    assert stats["builds"] == 1

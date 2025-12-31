@@ -4,7 +4,12 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import { NextResponse } from "next/server";
-import { getGatesConfigPath, loadQualityGatesConfig, type QualityGatesConfig } from "../../../_lib/config";
+import {
+  getDoclingConfigPath,
+  getGatesConfigPath,
+  loadQualityGatesConfig,
+  type QualityGatesConfig
+} from "../../../_lib/config";
 import { getMissingEnv } from "../../../_lib/env";
 import {
   ensureDataDirs,
@@ -16,7 +21,12 @@ import {
   upsertIndexDoc,
   writeJsonAtomic
 } from "../../../_lib/storage";
-import { runProcess, type ProcessResult } from "../../../_lib/processRunner";
+import {
+  submitWorkerJob,
+  type WorkerJobResult,
+  type WorkerProgressUpdate,
+  WorkerJobError
+} from "../../../_lib/workerClient";
 import { toDocMeta } from "../../../_lib/meta";
 import { metaFileSchema, type DocStatus, type MetaFile } from "../../../_lib/schema";
 import { generateDocId, getFileExtension } from "../../../_lib/utils";
@@ -232,9 +242,8 @@ export async function POST(req: Request) {
     return writeQueue;
   };
 
-  const handleProgressLine = (line: string) => {
-    const update = parseProgressLine(line);
-    if (!update) {
+  const handleProgressUpdate = (update: WorkerProgressUpdate) => {
+    if (update.jobId && update.jobId !== id) {
       return;
     }
     meta = applyProgress(meta, update, progressState);
@@ -249,23 +258,19 @@ export async function POST(req: Request) {
     void scheduleProgressWrite();
   };
 
-  void runProcess({
-    command: pythonBin,
-    args: [
-      workerPath,
-      "--input",
-      uploadPath,
-      "--doc-id",
-      id,
-      "--data-dir",
-      getDataDir(),
-      "--gates",
-      getGatesConfigPath()
-    ],
+  void submitWorkerJob({
+    pythonBin,
+    workerPath,
+    inputPath: uploadPath,
+    docId: id,
+    dataDir: getDataDir(),
+    gatesPath: getGatesConfigPath(),
+    doclingConfigPath: getDoclingConfigPath(),
+    requestId,
     timeoutMs: timeoutSec * 1000,
     stdoutTailBytes: config.limits.stdoutTailKb * 1024,
     stderrTailBytes: config.limits.stderrTailKb * 1024,
-    onStdoutLine: handleProgressLine
+    onProgress: handleProgressUpdate
   })
     .then(async (result) => {
       allowProgressWrites = false;
@@ -297,15 +302,40 @@ export async function POST(req: Request) {
           config.limits.stderrTailKb * 1024
         );
       }
+      const workerTimingLog = formatWorkerTimingsLog({
+        docId: id,
+        requestId,
+        timings: meta.processing.timings,
+        accelerator: meta.processing.docling?.accelerator
+      });
+      if (workerTimingLog) {
+        console.info(workerTimingLog);
+        meta = appendLogLineToMeta(
+          meta,
+          workerTimingLog,
+          config.limits.stderrTailKb * 1024
+        );
+      }
       await scheduleFinalWrite(meta);
       await fs.rm(progressPath, { force: true });
       await upsertIndexDoc(toDocMeta(meta));
     })
     .catch(async (error) => {
       allowProgressWrites = false;
+      const workerError = error instanceof WorkerJobError ? error : null;
+      const failureStage = workerError?.code === "WORKER_CRASHED" ? "PROCESS" : "SPAWN";
+      const failureMessage = (() => {
+        if (workerError?.code === "WORKER_CRASHED") {
+          return "Worker crashed during processing.";
+        }
+        if (workerError?.code === "WORKER_PROTOCOL") {
+          return "Worker communication failed.";
+        }
+        return "Failed to start the processing worker.";
+      })();
       meta = applyFailure(meta, {
-        stage: "SPAWN",
-        message: "Failed to start the processing worker.",
+        stage: failureStage,
+        message: failureMessage,
         finishedAt: new Date(),
         exitCode: -1,
         stderrTail: String(error)
@@ -405,6 +435,7 @@ type ProgressUpdate = {
   stage?: string;
   message?: string;
   progress?: number;
+  jobId?: string;
 };
 
 type ProgressState = {
@@ -431,7 +462,7 @@ type FinalizeOptions = {
   uploadPath: string;
   sha256: string;
   requestId: string;
-  result: ProcessResult;
+  result: WorkerJobResult;
   startedAt: Date;
   timeoutSec: number;
   progressState: ProgressState;
@@ -573,32 +604,6 @@ function applyProgress(
   };
 }
 
-function parseProgressLine(line: string): ProgressUpdate | null {
-  const trimmed = line.trim();
-  if (!trimmed.startsWith("{")) {
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (!isRecord(parsed)) {
-      return null;
-    }
-    const event = parsed.event ?? parsed.type;
-    if (event !== "progress") {
-      return null;
-    }
-    const stage = typeof parsed.stage === "string" ? parsed.stage : undefined;
-    const message = typeof parsed.message === "string" ? parsed.message : undefined;
-    const progress = typeof parsed.progress === "number" ? parsed.progress : undefined;
-    if (!stage && !message && typeof progress !== "number") {
-      return null;
-    }
-    return { stage, message, progress };
-  } catch (error) {
-    return null;
-  }
-}
-
 function clampProgress(value: number) {
   if (!Number.isFinite(value)) {
     return 0;
@@ -616,10 +621,6 @@ function isFileLike(value: FormDataEntryValue | null): value is File {
     typeof candidate.name === "string" &&
     typeof candidate.type === "string"
   );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function resolveExtension(extension: string, mimeType: string) {
@@ -695,6 +696,25 @@ function formatStageTimingsLog(options: {
     status,
     totalMs,
     timings
+  });
+}
+
+function formatWorkerTimingsLog(options: {
+  docId: string;
+  requestId: string;
+  timings: MetaFile["processing"]["timings"];
+  accelerator?: string;
+}) {
+  const { docId, requestId, timings, accelerator } = options;
+  if (!timings) {
+    return null;
+  }
+  return JSON.stringify({
+    event: "worker_stage_timings",
+    docId,
+    requestId,
+    timings,
+    accelerator
   });
 }
 

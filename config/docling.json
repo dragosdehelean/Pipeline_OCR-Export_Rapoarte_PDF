@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "defaultProfile": "digital-balanced",
+  "profiles": {
+    "digital-balanced": {
+      "pdfBackend": "dlparse_v2",
+      "doOcr": false,
+      "doTableStructure": true,
+      "tableStructureMode": "fast",
+      "documentTimeoutSec": 240
+    },
+    "digital-fast": {
+      "pdfBackend": "dlparse_v2",
+      "doOcr": false,
+      "doTableStructure": false,
+      "tableStructureMode": "fast",
+      "documentTimeoutSec": 240
+    }
+  },
+  "preflight": {
+    "pdfText": {
+      "enabled": true,
+      "samplePages": 3,
+      "minTextChars": 20,
+      "minTextCharsPerPageAvg": 5
+    }
+  },
+  "docling": {
+    "accelerator": "auto"
+  }
+}

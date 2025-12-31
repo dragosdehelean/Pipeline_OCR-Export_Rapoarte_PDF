@@ -458,6 +458,7 @@ export default function UploadForm() {
             <li>Copy `.env.local.example` to `.env.local`</li>
             <li>Set `PYTHON_BIN`, `DOCLING_WORKER`, `DATA_DIR`</li>
             <li>Set `GATES_CONFIG_PATH` to `config/quality-gates.json`</li>
+            <li>Set `DOCLING_CONFIG_PATH` to `config/docling.json` (optional)</li>
             <li>Restart `npm run dev` after editing `.env.local`</li>
           </ul>
           {health.missingEnv.length > 0 ? (

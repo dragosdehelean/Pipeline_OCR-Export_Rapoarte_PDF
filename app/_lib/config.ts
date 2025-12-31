@@ -1,5 +1,5 @@
 /**
- * @fileoverview Loads and validates the quality gates config from disk.
+ * @fileoverview Loads and validates quality gates and Docling config files.
  */
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -52,6 +52,53 @@ export const qualityGatesSchema = z
 export type QualityGatesConfig = z.infer<typeof qualityGatesSchema>;
 
 let cachedConfig: QualityGatesConfig | null = null;
+let cachedDoclingConfig: DoclingConfig | null = null;
+
+const doclingProfileSchema = z
+  .object({
+    pdfBackend: z.string(),
+    doOcr: z.boolean(),
+    doTableStructure: z.boolean(),
+    tableStructureMode: z.string(),
+    documentTimeoutSec: z.number()
+  })
+  .strict();
+
+export const doclingConfigSchema = z
+  .object({
+    version: z.number(),
+    defaultProfile: z.string(),
+    profiles: z.record(doclingProfileSchema),
+    preflight: z
+      .object({
+        pdfText: z
+          .object({
+            enabled: z.boolean(),
+            samplePages: z.number(),
+            minTextChars: z.number(),
+            minTextCharsPerPageAvg: z.number()
+          })
+          .strict()
+      })
+      .strict(),
+    docling: z
+      .object({
+        accelerator: z.string()
+      })
+      .strict()
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (!value.profiles[value.defaultProfile]) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `defaultProfile "${value.defaultProfile}" is missing from profiles.`,
+        path: ["defaultProfile"]
+      });
+    }
+  });
+
+export type DoclingConfig = z.infer<typeof doclingConfigSchema>;
 
 /**
  * Resolves the quality gates config path from env or defaults.
@@ -60,6 +107,16 @@ export function getGatesConfigPath(): string {
   return (
     process.env.GATES_CONFIG_PATH ||
     path.join(process.cwd(), "config", "quality-gates.json")
+  );
+}
+
+/**
+ * Resolves the Docling config path from env or defaults.
+ */
+export function getDoclingConfigPath(): string {
+  return (
+    process.env.DOCLING_CONFIG_PATH ||
+    path.join(process.cwd(), "config", "docling.json")
   );
 }
 
@@ -73,7 +130,34 @@ export async function loadQualityGatesConfig(): Promise<QualityGatesConfig> {
 
   const configPath = getGatesConfigPath();
   const raw = await fs.readFile(configPath, "utf-8");
-  const parsed = qualityGatesSchema.parse(JSON.parse(raw));
+  const parsedJson = JSON.parse(raw) as Record<string, unknown>;
+  const hasLegacyKeys =
+    typeof parsedJson === "object" &&
+    parsedJson !== null &&
+    ("preflight" in parsedJson || "docling" in parsedJson);
+  if (hasLegacyKeys) {
+    console.warn(
+      "[config] Deprecated docling/preflight keys found in quality-gates.json. Move them to config/docling.json."
+    );
+    delete parsedJson.preflight;
+    delete parsedJson.docling;
+  }
+  const parsed = qualityGatesSchema.parse(parsedJson);
   cachedConfig = parsed;
+  return parsed;
+}
+
+/**
+ * Loads and caches the parsed Docling config.
+ */
+export async function loadDoclingConfig(): Promise<DoclingConfig> {
+  if (cachedDoclingConfig) {
+    return cachedDoclingConfig;
+  }
+
+  const configPath = getDoclingConfigPath();
+  const raw = await fs.readFile(configPath, "utf-8");
+  const parsed = doclingConfigSchema.parse(JSON.parse(raw));
+  cachedDoclingConfig = parsed;
   return parsed;
 }

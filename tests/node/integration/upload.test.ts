@@ -8,6 +8,7 @@ import { POST as upload } from "../../../app/api/docs/upload/route";
 import { GET as listDocs } from "../../../app/api/docs/route";
 import { GET as getMeta } from "../../../app/api/docs/[id]/route";
 import { metaFileSchema, type MetaFile } from "../../../app/_lib/schema";
+import { shutdownWorker } from "../../../app/_lib/workerClient";
 
 async function createTempDir() {
   return await fs.mkdtemp(path.join(os.tmpdir(), "doc-ingest-"));
@@ -58,6 +59,7 @@ describe("docs api integration", () => {
   });
 
   afterAll(async () => {
+    await shutdownWorker();
     Object.keys(process.env).forEach((key) => {
       if (!(key in originalEnv)) {
         delete process.env[key];
