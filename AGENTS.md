@@ -21,6 +21,7 @@ Node / Next.js:
 Python worker:
   - Install deps: `cd services/docling_worker` then `uv sync --locked --group test`
   - Note: `--locked` keeps the venv aligned with `uv.lock` and prevents dependency drift.
+  - If `uv` is not recognized, use `python -m uv sync --locked --group test` and `python -m uv run pytest -q`.
   - Tests: `cd services/docling_worker` then `uv run pytest -q`
 
 ## 2) Repo map (where things go)
@@ -91,7 +92,9 @@ Python worker:
 - Docling (default)
 - PyMuPDF4LLM (layout/standard)
 - PyMuPDF text flags
-- `pymupdf4llm.show_progress` must remain disabled because worker stdout is JSONL; UI uses worker progress events.
+- `pymupdf4llm.show_progress` (console tqdm) stays disabled to keep worker stdout JSONL-only.
+- UI progress still updates because the worker emits per-page `emit_progress(...)` events.
+- Do not enable any library progress output to stdout; it can break JSON parsing.
 
 ## 6) Per-document artifacts
 For each ingested document `id`:

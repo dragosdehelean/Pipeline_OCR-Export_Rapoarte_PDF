@@ -38,7 +38,12 @@ Install uv (once):
 ```
 python -m pip install --user uv
 ```
+Windows tip: if `uv` is not recognized, you can run commands via Python.
+Equivalent examples:
+- Preferred: `uv sync --locked --group test`
+- Fallback: `python -m uv sync --locked --group test`
 Create a worker venv and sync deps:
+If `uv` is not recognized, use `python -m uv` for each command below.
 ```
 cd services/docling_worker
 uv venv
@@ -46,6 +51,7 @@ uv sync --locked --group test
 ```
 Always use `--locked` to keep the worker venv aligned with `uv.lock` and prevent dependency drift.
 Run worker tests:
+If `uv` is not recognized, use `python -m uv` for the command below.
 ```
 uv run pytest -q
 ```
@@ -107,6 +113,7 @@ Use an existing dev server for UX audit:
 $env:UX_AUDIT_BASE_URL="http://127.0.0.1:3000"; npm run test:ux
 ```
 Python tests:
+If `uv` is not recognized, use `python -m uv` for the command below.
 ```
 cd services/docling_worker
 uv run pytest -q
@@ -116,7 +123,9 @@ uv run pytest -q
 - Default engine is Docling.
 - PyMuPDF4LLM supports layout/standard modes (layout requires `pymupdf-layout`).
 - PyMuPDF text extraction uses configurable TEXT_* flags from `config/pymupdf.json`.
-- `pymupdf4llm.show_progress` must remain disabled because worker stdout is JSONL.
+- `pymupdf4llm.show_progress` (console tqdm) stays disabled to keep worker stdout JSONL-only.
+- The UI progress bar still updates because the worker emits per-page `emit_progress(...)` events.
+- Do not enable any library progress output to stdout; it can break JSON parsing.
 
 ### Docling profiles
 - The default profile is `digital-balanced`: OCR is disabled by design, table structure runs in FAST mode, and the PDF backend is set to `dlparse_v2` in `config/docling.json`.

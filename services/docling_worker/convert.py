@@ -1329,6 +1329,7 @@ def run_pymupdf4llm_conversion(
     meta_path = os.path.join(export_dir, "meta.json")
     llm_config = pymupdf_config.get("pymupdf4llm", {})
     to_markdown_config = dict(llm_config.get("toMarkdown", {}))
+    # Keep stdout JSON-only; UI progress comes from emit_progress events.
     to_markdown_config["show_progress"] = False
     layout_requested = layout_mode == "layout"
     layout_enabled = bool(llm_config.get("layoutEnabled", True))
