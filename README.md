@@ -44,6 +44,7 @@ cd services/docling_worker
 uv venv
 uv sync --locked --group test
 ```
+Always use `--locked` to keep the worker venv aligned with `uv.lock` and prevent dependency drift.
 Run worker tests:
 ```
 uv run pytest -q

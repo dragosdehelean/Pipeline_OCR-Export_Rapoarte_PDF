@@ -20,6 +20,7 @@ Node / Next.js:
 
 Python worker:
   - Install deps: `cd services/docling_worker` then `uv sync --locked --group test`
+  - Note: `--locked` keeps the venv aligned with `uv.lock` and prevents dependency drift.
   - Tests: `cd services/docling_worker` then `uv run pytest -q`
 
 ## 2) Repo map (where things go)

@@ -164,6 +164,67 @@ describe("UploadForm", () => {
     expect(screen.getByRole("button", { name: "Upload" })).toBeDisabled();
   });
 
+  it("disables pymupdf engines when worker deps are unavailable", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse({
+          ok: true,
+          missingEnv: [],
+          resolved: { PYTHON_BIN: "python", DOCLING_WORKER: "worker.py" },
+          config: healthConfig,
+          configError: null,
+          pymupdf: {
+            engines: ["docling", "pymupdf4llm", "pymupdf_text"],
+            defaultEngine: "docling",
+            layoutModeDefault: "layout",
+            availability: {
+              pymupdf_text: {
+                available: false,
+                reason: "IMPORT_PYMUPDF_FAILED"
+              },
+              pymupdf4llm: {
+                available: false,
+                reason: "IMPORT_PYMUPDF4LLM_FAILED"
+              },
+              layout: {
+                available: false,
+                reason: "IMPORT_PYMUPDF_LAYOUT_FAILED"
+              }
+            }
+          }
+        })
+      )
+    );
+
+    renderWithClient(<UploadForm />);
+
+    const input = await screen.findByLabelText("Choose a file");
+    const file = new File(["content"], "sample.pdf", { type: "application/pdf" });
+    fireEvent.change(input, { target: { files: [file] } });
+
+    const engineSelect = document.getElementById(
+      "engine-override"
+    ) as HTMLSelectElement | null;
+    expect(engineSelect).not.toBeNull();
+
+    const options = Array.from(engineSelect!.options);
+    const doclingOption = options.find((option) => option.value === "docling");
+    const pymupdf4llmOption = options.find(
+      (option) => option.value === "pymupdf4llm"
+    );
+    const pymupdfTextOption = options.find(
+      (option) => option.value === "pymupdf_text"
+    );
+
+    expect(doclingOption).toBeTruthy();
+    expect(pymupdf4llmOption).toBeTruthy();
+    expect(pymupdfTextOption).toBeTruthy();
+    expect(doclingOption?.disabled).toBe(false);
+    expect(pymupdf4llmOption?.disabled).toBe(true);
+    expect(pymupdfTextOption?.disabled).toBe(true);
+  });
+
   it("shows a post-upload banner with a details link", async () => {
     const fetchMock = vi.fn();
     const metaSuccess = metaFileSchema.parse({
