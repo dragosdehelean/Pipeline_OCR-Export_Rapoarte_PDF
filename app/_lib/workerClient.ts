@@ -120,7 +120,7 @@ type WorkerState = {
   startPromise: Promise<WorkerStatusSnapshot> | null;
   startResolve: ((value: WorkerStatusSnapshot) => void) | null;
   startReject: ((error: WorkerJobError) => void) | null;
-  shutdownRegistered: boolean;
+  shutdownHandlersRegistered: boolean;
 };
 
 const getWorkerState = (): WorkerState => {
@@ -143,7 +143,7 @@ const getWorkerState = (): WorkerState => {
       startPromise: null,
       startResolve: null,
       startReject: null,
-      shutdownRegistered: false
+      shutdownHandlersRegistered: false
     };
   }
   return globalState.__DOC_WORKER__;
@@ -276,16 +276,23 @@ export async function shutdownWorker(): Promise<void> {
  * Registers process signal handlers to stop the worker on shutdown.
  */
 export function registerWorkerShutdownHandlers(): void {
-  if (state.shutdownRegistered) {
+  if (state.shutdownHandlersRegistered) {
     return;
   }
-  state.shutdownRegistered = true;
+  state.shutdownHandlersRegistered = true;
   const handleShutdown = () => {
     void shutdownWorker();
   };
   process.once("SIGINT", handleShutdown);
   process.once("SIGTERM", handleShutdown);
   process.once("beforeExit", handleShutdown);
+}
+
+/**
+ * Returns whether shutdown handlers are already registered (test helper).
+ */
+export function getShutdownHandlersRegisteredForTests(): boolean {
+  return state.shutdownHandlersRegistered;
 }
 
 

@@ -6,7 +6,10 @@ export async function register() {
     return;
   }
   const { prewarmDoclingWorker } = await import("./instrumentation-node");
-  void prewarmDoclingWorker();
+  console.info("[worker] Prewarm started ...");
+  prewarmDoclingWorker().catch((error) => {
+    console.error("[worker] Prewarm failed", error);
+  });
 }
 
 export const runtime = "nodejs";
