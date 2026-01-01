@@ -64,5 +64,6 @@ describe("health api", () => {
     expect(payload.resolved.DOCLING_WORKER).toBe("worker.py");
     expect(payload.config.accept.extensions).toEqual(gatesConfig.accept.extensions);
     expect(payload.config.limits.maxFileSizeMb).toBe(gatesConfig.limits.maxFileSizeMb);
+    expect(payload.doclingWorker).not.toBeUndefined();
   });
 });

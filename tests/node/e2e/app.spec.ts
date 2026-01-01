@@ -131,7 +131,12 @@ test.describe.serial("quality-critical e2e", () => {
     test.setTimeout(uploadTimeoutMs * 2);
     await page.addInitScript(() => {
       const entries: { name: string; value: string }[] = [];
-      const originalAppend = FormData.prototype.append;
+      const originalAppend = FormData.prototype.append as (
+        this: FormData,
+        name: string,
+        value: string | Blob,
+        fileName?: string
+      ) => void;
       FormData.prototype.append = function (
         name: string,
         value: string | Blob,
@@ -141,6 +146,9 @@ test.describe.serial("quality-critical e2e", () => {
           name,
           value: typeof value === "string" ? value : "FILE"
         });
+        if (typeof value === "string") {
+          return originalAppend.call(this, name, value);
+        }
         return originalAppend.call(this, name, value, fileName);
       };
       (window as Window & { __formDataEntries?: { name: string; value: string }[] })

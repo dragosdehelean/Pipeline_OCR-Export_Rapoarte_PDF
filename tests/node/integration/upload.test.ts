@@ -7,6 +7,7 @@ import path from "node:path";
 import { POST as upload } from "../../../app/api/docs/upload/route";
 import { GET as listDocs } from "../../../app/api/docs/route";
 import { GET as getMeta } from "../../../app/api/docs/[id]/route";
+import { GET as getHealth } from "../../../app/api/health/route";
 import { metaFileSchema, type MetaFile } from "../../../app/_lib/schema";
 import { shutdownWorker } from "../../../app/_lib/workerClient";
 
@@ -89,10 +90,20 @@ describe("docs api integration", () => {
     expect(payload.status).toBe("PENDING");
     const meta = await waitForMeta(payload.id);
     expect(meta.processing.status).toBe("SUCCESS");
+    expect(meta.docling?.requested?.profile).toBeDefined();
+    expect(meta.docling?.effective?.pdfBackendEffective).toBeDefined();
+    expect(meta.docling?.effective?.tableModeEffective).toBeDefined();
+    expect(meta.docling?.effective?.doCellMatchingEffective).not.toBeUndefined();
 
     const listResponse = await listDocs();
     const listPayload = await listResponse.json();
     expect(listPayload.docs.length).toBeGreaterThan(0);
+
+    const healthResponse = await getHealth();
+    const healthPayload = await healthResponse.json();
+    expect(healthPayload.docling?.profiles).toBeDefined();
+    expect(healthPayload.doclingWorker?.capabilities?.doclingVersion).toBeDefined();
+    expect(healthPayload.doclingWorker?.lastJob?.docId).toBe(payload.id);
   });
 
   it("uploads a bad document and returns failed status", async () => {

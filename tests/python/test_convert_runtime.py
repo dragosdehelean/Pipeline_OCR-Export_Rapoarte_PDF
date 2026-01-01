@@ -207,6 +207,84 @@ def test_run_conversion_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     assert meta["outputs"]["jsonPath"] is not None
 
 
+def test_docling_proof_logging_requested_vs_effective(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    convert.reset_converter_cache()
+    config = load_repo_config()
+    docling_config = {
+        "version": 1,
+        "defaultProfile": "digital-accurate-nocellmatch",
+        "profiles": {
+            "digital-accurate-nocellmatch": {
+                "pdfBackend": "dlparse_v4",
+                "doOcr": False,
+                "doTableStructure": True,
+                "doCellMatching": False,
+                "tableStructureMode": "accurate",
+                "documentTimeoutSec": 120,
+            }
+        },
+        "preflight": {"pdfText": {"enabled": False}},
+        "docling": {"accelerator": {"defaultDevice": "cpu"}},
+    }
+    docling_path = tmp_path / "docling.json"
+    docling_path.write_text(json.dumps(docling_config), encoding="utf-8")
+
+    class DummyDocument:
+        def __init__(self):
+            self.num_pages = 1
+            self.texts = []
+            self.tables = []
+
+        def export_to_markdown(self):
+            return "# ok"
+
+        def export_to_dict(self):
+            return {"ok": True}
+
+    class DummyResult:
+        def __init__(self):
+            self.document = DummyDocument()
+
+    class DummyConverter:
+        def convert(self, path: str):
+            return DummyResult()
+
+    monkeypatch.setattr(convert, "get_docling_converter", lambda settings: DummyConverter())
+
+    input_path = tmp_path / "input.pdf"
+    input_path.write_text("%PDF-1.4", encoding="utf-8")
+
+    args = types.SimpleNamespace(
+        input=str(input_path),
+        doc_id="doc-proof",
+        data_dir=str(tmp_path),
+        gates=str(CONFIG_PATH),
+        docling_config=str(docling_path),
+    )
+
+    exit_code = convert.run_conversion(args)
+    assert exit_code == 0
+
+    meta_path = tmp_path / "exports" / "doc-proof" / "meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    requested = meta["docling"]["requested"]
+    effective = meta["docling"]["effective"]
+    fallback = effective.get("fallbackReasons", [])
+
+    assert requested["profile"] == "digital-accurate-nocellmatch"
+    assert requested["pdfBackendRequested"] == "dlparse_v4"
+    assert requested["tableModeRequested"] == "accurate"
+    assert requested["doCellMatchingRequested"] is False
+    assert effective["doclingVersion"]
+    assert effective["pdfBackendEffective"]
+    assert effective["tableModeEffective"]
+    assert effective.get("doCellMatchingEffective", None) in (False, None)
+    if effective.get("doCellMatchingEffective") is not False:
+        assert "DO_CELL_MATCHING_UNSUPPORTED" in fallback
+
+
 def test_preflight_rejects_scan_like_pdf(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     convert.reset_converter_cache()
     input_path = ROOT_DIR / "tests" / "fixtures" / "docs" / "scan_like_no_text.pdf"

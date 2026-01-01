@@ -15,6 +15,21 @@
       "doTableStructure": false,
       "tableStructureMode": "fast",
       "documentTimeoutSec": 240
+    },
+    "digital-accurate": {
+      "pdfBackend": "dlparse_v4",
+      "doOcr": false,
+      "doTableStructure": true,
+      "tableStructureMode": "accurate",
+      "documentTimeoutSec": 240
+    },
+    "digital-accurate-nocellmatch": {
+      "pdfBackend": "dlparse_v4",
+      "doOcr": false,
+      "doTableStructure": true,
+      "tableStructureMode": "accurate",
+      "doCellMatching": false,
+      "documentTimeoutSec": 240
     }
   },
   "preflight": {

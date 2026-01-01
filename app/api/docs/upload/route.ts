@@ -76,6 +76,7 @@ export async function POST(req: Request) {
 
   const file = formData.get("file");
   const deviceOverride = parseDeviceOverride(formData.get("deviceOverride"));
+  const profileOverride = parseProfile(formData.get("profile"));
 
   if (!isFileLike(file)) {
     return jsonError({
@@ -268,6 +269,7 @@ export async function POST(req: Request) {
     gatesPath: getGatesConfigPath(),
     doclingConfigPath: getDoclingConfigPath(),
     deviceOverride,
+    profile: profileOverride,
     requestId,
     timeoutMs: timeoutSec * 1000,
     stdoutTailBytes: config.limits.stdoutTailKb * 1024,
@@ -293,6 +295,7 @@ export async function POST(req: Request) {
         timeoutSec,
         progressState
       });
+      logDoclingProof(meta);
       const timingLog = formatStageTimingsLog({
         docId: id,
         requestId,
@@ -657,6 +660,14 @@ function parseDeviceOverride(value: FormDataEntryValue | null) {
   return null;
 }
 
+function parseProfile(value: FormDataEntryValue | null) {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 function resolveStartedAt(meta: MetaFile, fallback: Date) {
   const startedAt = meta.processing.startedAt;
   if (typeof startedAt === "string") {
@@ -771,6 +782,22 @@ function formatWorkerTimingsLog(options: {
     workerReused,
     spawnedThisRequest
   });
+}
+
+function logDoclingProof(meta: MetaFile) {
+  const requested = meta.docling?.requested ?? null;
+  const effective = meta.docling?.effective ?? null;
+  if (!requested && !effective) {
+    return;
+  }
+  const payload = {
+    event: "ingest_docling_effective",
+    docId: meta.id,
+    requestId: meta.requestId,
+    requested,
+    effective
+  };
+  console.info(`INGEST_META ${JSON.stringify(payload)}`);
 }
 
 function appendLogLineToMeta(meta: MetaFile, line: string, maxBytes: number): MetaFile {

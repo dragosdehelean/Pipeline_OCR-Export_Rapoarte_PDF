@@ -9,7 +9,9 @@ import sys
 import time
 import base64
 import zlib
-from dataclasses import dataclass
+import importlib
+import inspect
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple
 
@@ -21,6 +23,8 @@ except ImportError:
 SCRIPT_START = time.perf_counter()
 CONVERTER_CACHE: Dict[str, Any] = {}
 CONVERTER_CACHE_STATS = {"builds": 0, "hits": 0}
+CAPABILITIES_CACHE: Optional[Dict[str, Any]] = None
+LAST_JOB_PROOF: Optional[Dict[str, Any]] = None
 
 
 @dataclass(frozen=True)
@@ -42,6 +46,11 @@ class DoclingSettings:
     table_structure_mode: str
     document_timeout_sec: int
     accelerator: AcceleratorSelection
+    do_cell_matching: Optional[bool] = None
+    requested_settings: Dict[str, Any] = field(default_factory=dict)
+    effective_settings: Dict[str, Any] = field(default_factory=dict)
+    fallback_reasons: Tuple[str, ...] = ()
+    capabilities: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -182,6 +191,28 @@ def emit_result(job_id: str, exit_code: int, meta_path: str) -> None:
     )
 
 
+def log_docling_effective(doc_id: str, settings: DoclingSettings) -> None:
+    """Emits a single-line JSON log for Docling requested/effective settings."""
+    payload = {
+        "docId": doc_id,
+        "requested": settings.requested_settings,
+        "effective": settings.effective_settings,
+        "fallbackReasons": list(settings.fallback_reasons),
+    }
+    print(f"DOCLING_EFFECTIVE {json.dumps(payload)}", flush=True)
+
+
+def record_docling_proof(doc_id: str, settings: DoclingSettings) -> None:
+    """Stores the last job's Docling proof for health/debug."""
+    global LAST_JOB_PROOF
+    LAST_JOB_PROOF = {
+        "docId": doc_id,
+        "requested": settings.requested_settings,
+        "effective": settings.effective_settings,
+        "fallbackReasons": list(settings.fallback_reasons),
+    }
+
+
 def get_docling_version() -> str:
     """Returns the docling version when available."""
     try:
@@ -190,6 +221,73 @@ def get_docling_version() -> str:
         return getattr(docling, "__version__", "UNKNOWN")
     except Exception:
         return "UNKNOWN"
+
+
+def _try_import_attr(module_name: str, attr_name: str) -> bool:
+    """Checks whether a module exposes a given attribute."""
+    try:
+        module = importlib.import_module(module_name)
+    except Exception:
+        return False
+    return hasattr(module, attr_name)
+
+
+def get_docling_capabilities() -> Dict[str, Any]:
+    """Returns best-effort Docling runtime capabilities without heavy imports."""
+    global CAPABILITIES_CACHE
+    if CAPABILITIES_CACHE is not None:
+        return dict(CAPABILITIES_CACHE)
+
+    capabilities: Dict[str, Any] = {
+        "doclingVersion": get_docling_version(),
+        "pdfBackends": [],
+        "tableModes": [],
+        "tableStructureOptionsFields": [],
+        "cudaAvailable": None,
+        "gpuName": None,
+        "torchVersion": None,
+        "torchCudaVersion": None,
+    }
+
+    backend_checks = [
+        ("dlparse_v1", "docling.backend.docling_parse_backend", "DoclingParseDocumentBackend"),
+        ("dlparse_v2", "docling.backend.docling_parse_v2_backend", "DoclingParseV2DocumentBackend"),
+        ("dlparse_v4", "docling.backend.docling_parse_v4_backend", "DoclingParseV4DocumentBackend"),
+        ("pypdfium2", "docling.backend.pypdfium2_backend", "PyPdfiumDocumentBackend"),
+    ]
+    for backend_name, module_name, attr_name in backend_checks:
+        if _try_import_attr(module_name, attr_name):
+            capabilities["pdfBackends"].append(backend_name)
+
+    try:
+        from docling.datamodel.pipeline_options import TableFormerMode, TableStructureOptions
+
+        capabilities["tableModes"] = [
+            member.name.lower() for member in TableFormerMode
+        ]
+        signature = inspect.signature(TableStructureOptions.__init__)
+        capabilities["tableStructureOptionsFields"] = [
+            param.name for param in signature.parameters.values() if param.name != "self"
+        ]
+    except Exception:
+        capabilities["tableModes"] = []
+        capabilities["tableStructureOptionsFields"] = []
+
+    torch_available, torch_version, torch_cuda_version, cuda_available = get_torch_info()
+    if torch_available:
+        capabilities["torchVersion"] = torch_version
+        capabilities["torchCudaVersion"] = torch_cuda_version
+        capabilities["cudaAvailable"] = cuda_available
+        if cuda_available:
+            try:
+                import torch
+
+                capabilities["gpuName"] = torch.cuda.get_device_name(0)
+            except Exception:
+                capabilities["gpuName"] = None
+
+    CAPABILITIES_CACHE = dict(capabilities)
+    return dict(capabilities)
 
 
 def resolve_docling_config_path(docling_path: Optional[str]) -> Optional[str]:
@@ -319,16 +417,69 @@ def resolve_docling_settings(
     profile, profile_cfg = resolve_profile_config(docling_config, profile_override)
     requested_device = resolve_requested_device(docling_config, device_override)
     accelerator = select_accelerator(requested_device)
+    requested_pdf_backend = str(profile_cfg.get("pdfBackend", "dlparse_v2"))
+    requested_table_mode = resolve_table_structure_mode(
+        str(profile_cfg.get("tableStructureMode", "fast"))
+    )
+    requested_cell_matching = profile_cfg.get("doCellMatching")
+    requested_settings = {
+        "profile": profile,
+        "pdfBackendRequested": requested_pdf_backend,
+        "tableModeRequested": requested_table_mode,
+        "doCellMatchingRequested": (
+            bool(requested_cell_matching) if requested_cell_matching is not None else None
+        ),
+    }
+    capabilities = get_docling_capabilities()
+    fallback_reasons: list[str] = []
+    available_backends = set(capabilities.get("pdfBackends", []))
+    effective_pdf_backend = requested_pdf_backend
+    if available_backends and requested_pdf_backend not in available_backends:
+        for fallback in ("dlparse_v4", "dlparse_v2", "dlparse_v1", "pypdfium2"):
+            if fallback in available_backends:
+                effective_pdf_backend = fallback
+                break
+        fallback_reasons.append(
+            f"PDF_BACKEND_FALLBACK:{requested_pdf_backend}->{effective_pdf_backend}"
+        )
+
+    available_modes = set(capabilities.get("tableModes", []))
+    effective_table_mode = requested_table_mode
+    if available_modes and requested_table_mode not in available_modes:
+        effective_table_mode = "fast" if "fast" in available_modes else requested_table_mode
+        fallback_reasons.append(
+            f"TABLE_MODE_FALLBACK:{requested_table_mode}->{effective_table_mode}"
+        )
+
+    requested_cell_value = requested_settings["doCellMatchingRequested"]
+    effective_cell_matching: Optional[bool] = requested_cell_value
+    supported_fields = set(capabilities.get("tableStructureOptionsFields", []))
+    if requested_cell_value is not None and supported_fields:
+        if "do_cell_matching" not in supported_fields:
+            effective_cell_matching = None
+            fallback_reasons.append("DO_CELL_MATCHING_UNSUPPORTED")
+
+    effective_settings = {
+        "doclingVersion": capabilities.get("doclingVersion", "UNKNOWN"),
+        "pdfBackendEffective": effective_pdf_backend,
+        "tableModeEffective": effective_table_mode,
+        "doCellMatchingEffective": effective_cell_matching,
+        "acceleratorEffective": accelerator.effective_device,
+        "fallbackReasons": fallback_reasons,
+    }
     return DoclingSettings(
         profile=profile,
-        pdf_backend=str(profile_cfg.get("pdfBackend", "dlparse_v2")),
+        pdf_backend=effective_pdf_backend,
         do_ocr=bool(profile_cfg.get("doOcr", False)),
         do_table_structure=bool(profile_cfg.get("doTableStructure", False)),
-        table_structure_mode=resolve_table_structure_mode(
-            str(profile_cfg.get("tableStructureMode", "fast"))
-        ),
+        table_structure_mode=effective_table_mode,
         document_timeout_sec=int(profile_cfg.get("documentTimeoutSec", 0)),
         accelerator=accelerator,
+        do_cell_matching=effective_cell_matching,
+        requested_settings=requested_settings,
+        effective_settings=effective_settings,
+        fallback_reasons=tuple(fallback_reasons),
+        capabilities=capabilities,
     )
 
 
@@ -411,7 +562,8 @@ def build_converter_cache_key(settings: DoclingSettings) -> str:
     return (
         f"{settings.profile}|{settings.pdf_backend}|{settings.do_ocr}|"
         f"{settings.do_table_structure}|{settings.table_structure_mode}|"
-        f"{settings.document_timeout_sec}|{settings.accelerator.effective_device}"
+        f"{settings.document_timeout_sec}|{settings.accelerator.effective_device}|"
+        f"{settings.do_cell_matching}"
     )
 
 
@@ -475,9 +627,12 @@ def get_docling_converter(settings: DoclingSettings) -> Any:
 
     accelerator_device = settings.accelerator.effective_device
     table_mode = resolve_table_structure_mode(settings.table_structure_mode)
-    table_options = TableStructureOptions(
-        mode=TableFormerMode.FAST if table_mode == "fast" else TableFormerMode.ACCURATE
-    )
+    table_options_kwargs: Dict[str, Any] = {
+        "mode": TableFormerMode.FAST if table_mode == "fast" else TableFormerMode.ACCURATE
+    }
+    if settings.do_cell_matching is not None:
+        table_options_kwargs["do_cell_matching"] = settings.do_cell_matching
+    table_options = TableStructureOptions(**table_options_kwargs)
 
     document_timeout = (
         float(settings.document_timeout_sec)
@@ -630,6 +785,21 @@ def build_base_meta(
     """Builds the initial meta.json payload for a document."""
     size_bytes = os.path.getsize(input_path)
     accelerator = settings.accelerator
+    docling_meta = {
+        "pdfBackend": settings.pdf_backend,
+        "doOcr": settings.do_ocr,
+        "doTableStructure": settings.do_table_structure,
+        "tableStructureMode": settings.table_structure_mode,
+        "documentTimeoutSec": settings.document_timeout_sec,
+        "accelerator": accelerator.effective_device,
+    }
+    if settings.do_cell_matching is not None:
+        docling_meta["doCellMatching"] = settings.do_cell_matching
+    docling_summary = {
+        "requested": settings.requested_settings,
+        "effective": settings.effective_settings,
+        "capabilities": settings.capabilities,
+    }
     timings = {
         "pythonStartupMs": python_startup_ms,
         "preflightMs": 0,
@@ -666,14 +836,7 @@ def build_base_meta(
             "timeoutSec": config.get("limits", {}).get("processTimeoutSec", 0),
             "exitCode": 0,
             "selectedProfile": settings.profile,
-            "docling": {
-                "pdfBackend": settings.pdf_backend,
-                "doOcr": settings.do_ocr,
-                "doTableStructure": settings.do_table_structure,
-                "tableStructureMode": settings.table_structure_mode,
-                "documentTimeoutSec": settings.document_timeout_sec,
-                "accelerator": accelerator.effective_device,
-            },
+            "docling": docling_meta,
             "accelerator": accelerator_meta,
             "timings": timings,
             "worker": {
@@ -682,6 +845,7 @@ def build_base_meta(
                 "doclingVersion": get_docling_version(),
             },
         },
+        "docling": docling_summary,
         "outputs": {
             "markdownPath": None,
             "jsonPath": None,
@@ -732,6 +896,7 @@ def run_conversion(
     )
     settings = resolve_docling_settings(
         docling_config,
+        profile_override=getattr(args, "profile", None),
         device_override=getattr(args, "device_override", None),
     )
     export_dir = os.path.join(args.data_dir, "exports", args.doc_id)
@@ -744,6 +909,8 @@ def run_conversion(
         else int((time.perf_counter() - SCRIPT_START) * 1000)
     )
     meta = build_base_meta(args.doc_id, args.input, config, settings, startup_ms)
+    record_docling_proof(args.doc_id, settings)
+    log_docling_effective(args.doc_id, settings)
     start = time.time()
 
     try:
@@ -894,6 +1061,16 @@ def run_worker_loop() -> int:
             continue
         if message.get("type") == "shutdown":
             break
+        if message.get("type") == "capabilities":
+            emit_event(
+                {
+                    "event": "capabilities",
+                    "requestId": message.get("requestId"),
+                    "capabilities": get_docling_capabilities(),
+                    "lastJob": LAST_JOB_PROOF,
+                }
+            )
+            continue
         if message.get("type") != "job":
             continue
 
@@ -904,6 +1081,7 @@ def run_worker_loop() -> int:
         gates_path = message.get("gates")
         docling_config_path = message.get("doclingConfig")
         device_override = message.get("deviceOverride")
+        profile = message.get("profile")
         if (
             not job_id
             or not input_path
@@ -920,6 +1098,7 @@ def run_worker_loop() -> int:
             gates=gates_path,
             docling_config=docling_config_path,
             device_override=device_override,
+            profile=profile,
         )
         exit_code = run_conversion(args, job_id=job_id, python_startup_ms=python_startup_ms)
         meta_path = os.path.join(data_dir, "exports", doc_id, "meta.json")
@@ -938,6 +1117,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--gates")
     parser.add_argument("--docling-config")
     parser.add_argument("--device-override")
+    parser.add_argument("--profile")
     return parser
 
 

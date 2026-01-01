@@ -80,9 +80,14 @@ export default function PreviewTabs({ markdown, json }: PreviewProps) {
     }, 1500);
   };
 
-  useEffect(() => {
+  const handleTabChange = (next: "markdown" | "json") => {
+    if (resetTimeout.current) {
+      window.clearTimeout(resetTimeout.current);
+      resetTimeout.current = null;
+    }
+    setActive(next);
     setCopyState("idle");
-  }, [active]);
+  };
 
   useEffect(() => {
     return () => {
@@ -102,7 +107,7 @@ export default function PreviewTabs({ markdown, json }: PreviewProps) {
         {markdown ? (
           <button
             className={`tab-button ${active === "markdown" ? "active" : ""}`}
-            onClick={() => setActive("markdown")}
+            onClick={() => handleTabChange("markdown")}
             type="button"
           >
             Markdown
@@ -111,7 +116,7 @@ export default function PreviewTabs({ markdown, json }: PreviewProps) {
         {json ? (
           <button
             className={`tab-button ${active === "json" ? "active" : ""}`}
-            onClick={() => setActive("json")}
+            onClick={() => handleTabChange("json")}
             type="button"
           >
             JSON

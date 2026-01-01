@@ -69,9 +69,51 @@ export const processingDoclingSchema = z
     pdfBackend: z.string(),
     doOcr: z.boolean(),
     doTableStructure: z.boolean(),
+    doCellMatching: z.boolean().optional(),
     tableStructureMode: z.string(),
     documentTimeoutSec: z.number(),
     accelerator: z.string()
+  })
+  .strict();
+
+export const doclingRequestedSchema = z
+  .object({
+    profile: z.string(),
+    pdfBackendRequested: z.string(),
+    tableModeRequested: z.string(),
+    doCellMatchingRequested: z.boolean().nullable().optional()
+  })
+  .strict();
+
+export const doclingEffectiveSchema = z
+  .object({
+    doclingVersion: z.string(),
+    pdfBackendEffective: z.string(),
+    tableModeEffective: z.string(),
+    doCellMatchingEffective: z.boolean().nullable().optional(),
+    acceleratorEffective: z.string().optional(),
+    fallbackReasons: z.array(z.string()).optional()
+  })
+  .strict();
+
+export const doclingCapabilitiesSchema = z
+  .object({
+    doclingVersion: z.string(),
+    pdfBackends: z.array(z.string()),
+    tableModes: z.array(z.string()),
+    tableStructureOptionsFields: z.array(z.string()).optional(),
+    cudaAvailable: z.boolean().nullable().optional(),
+    gpuName: z.string().nullable().optional(),
+    torchVersion: z.string().nullable().optional(),
+    torchCudaVersion: z.string().nullable().optional()
+  })
+  .strict();
+
+export const metaDoclingSchema = z
+  .object({
+    requested: doclingRequestedSchema,
+    effective: doclingEffectiveSchema,
+    capabilities: doclingCapabilitiesSchema.optional()
   })
   .strict();
 
@@ -172,6 +214,7 @@ export const metaFileSchema = z
     createdAt: z.string().optional(),
     source: metaSourceSchema,
     processing: metaProcessingSchema,
+    docling: metaDoclingSchema.optional(),
     outputs: metaOutputsSchema,
     metrics: metricsSchema,
     qualityGates: metaQualityGatesSchema,
