@@ -1,7 +1,7 @@
-<!-- @fileoverview Project setup, scripts, and structure for the Docling ingestion pipeline. -->
-# Doc Ingestion & Export (Docling-only)
+<!-- @fileoverview Project setup, scripts, and structure for the ingestion pipeline. -->
+# Doc Ingestion & Export
 
-Local-first Next.js app for PDF/DOCX upload, Docling conversion, strict quality gates, and Markdown/JSON exports.
+Local-first Next.js app for PDF/DOCX upload, configurable extraction engines, strict quality gates, and Markdown/JSON exports.
 
 ## Prerequisites
 - Node.js 20.9+
@@ -26,6 +26,7 @@ On macOS/Linux:
 cp .env.local.example .env.local
 ```
 Also set `DOCLING_WORKER` to `services/docling_worker/convert.py`.
+Optionally set `PYMUPDF_CONFIG_PATH` to `config/pymupdf.json`.
 
 4) Run the app:
 ```
@@ -110,7 +111,13 @@ cd services/docling_worker
 uv run pytest -q
 ```
 
-## Processing profile
+## Engines and profiles
+- Default engine is Docling.
+- PyMuPDF4LLM supports layout/standard modes (layout requires `pymupdf-layout`).
+- PyMuPDF text extraction uses configurable TEXT_* flags from `config/pymupdf.json`.
+- `pymupdf4llm.show_progress` must remain disabled because worker stdout is JSONL.
+
+### Docling profiles
 - The default profile is `digital-balanced`: OCR is disabled by design, table structure runs in FAST mode, and the PDF backend is set to `dlparse_v2` in `config/docling.json`.
 - `digital-fast` is available as a profile with table structure disabled.
 - `digital-accurate` uses `dlparse_v4` with TableFormer ACCURATE.
@@ -126,7 +133,7 @@ app/                      Next.js app router (UI + route handlers)
   _components/            UI components
   _lib/                   Shared logic (storage, config, schema, etc.)
 services/docling_worker/  Python Docling worker
-config/                   Quality gates config + Docling profiles
+config/                   Quality gates config + Docling/PyMuPDF configs
 tests/
   node/
     unit/
@@ -144,6 +151,7 @@ tests/node/e2e/data-test/  E2E data dir (gitignored)
 ## Notes
 - `config/quality-gates.json` is the single source of truth for thresholds and limits.
 - `config/docling.json` defines the Docling profiles + preflight settings.
+- `config/pymupdf.json` defines PyMuPDF engine defaults and flags.
 - All artifacts are stored under `data/` (gitignored).
 - `.env.local` stays local and is gitignored.
 - Client server-state is managed with TanStack Query.

@@ -9,6 +9,9 @@ description = "Docling worker for document ingestion and export."
 requires-python = ">=3.10"
 dependencies = [
   "docling",
+  "PyMuPDF",
+  "pymupdf4llm",
+  "pymupdf-layout",
   "reportlab",
 ]
 

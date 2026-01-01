@@ -178,6 +178,9 @@ def run_job(
     gates_path: str,
     job_id: str,
     docling_config_path: str | None,
+    pymupdf_config_path: str | None,
+    engine: str | None,
+    layout_mode: str | None,
     device_override: str | None,
     profile_override: str | None,
 ) -> int:
@@ -304,33 +307,51 @@ def run_job(
     if "doCellMatching" in profile_cfg:
         docling_meta["doCellMatching"] = profile_cfg.get("doCellMatching")
 
-    docling_requested = {
-        "profile": selected_profile,
-        "pdfBackendRequested": profile_cfg.get("pdfBackend", "dlparse_v2"),
-        "tableModeRequested": profile_cfg.get("tableStructureMode", "fast"),
-        "doCellMatchingRequested": (
-            bool(profile_cfg.get("doCellMatching"))
-            if "doCellMatching" in profile_cfg
-            else None
-        ),
+    engine_name = engine or "docling"
+    docling_requested = None
+    docling_effective = None
+    docling_caps = None
+    docling_processing = None
+    if engine_name == "docling":
+        docling_requested = {
+            "profile": selected_profile,
+            "pdfBackendRequested": profile_cfg.get("pdfBackend", "dlparse_v2"),
+            "tableModeRequested": profile_cfg.get("tableStructureMode", "fast"),
+            "doCellMatchingRequested": (
+                bool(profile_cfg.get("doCellMatching"))
+                if "doCellMatching" in profile_cfg
+                else None
+            ),
+        }
+        docling_effective = {
+            "doclingVersion": "FAKE",
+            "pdfBackendEffective": docling_meta["pdfBackend"],
+            "tableModeEffective": docling_meta["tableStructureMode"],
+            "doCellMatchingEffective": docling_meta.get("doCellMatching"),
+            "acceleratorEffective": effective_device,
+            "fallbackReasons": [],
+        }
+        docling_caps = {
+            "doclingVersion": "FAKE",
+            "pdfBackends": ["dlparse_v2", "dlparse_v4"],
+            "tableModes": ["fast", "accurate"],
+            "tableStructureOptionsFields": ["mode", "do_cell_matching"],
+            "cudaAvailable": cuda_available,
+            "gpuName": "FAKE_GPU" if cuda_available else None,
+            "torchVersion": "FAKE",
+            "torchCudaVersion": "FAKE",
+        }
+        docling_processing = docling_meta
+
+    engine_requested = {
+        "name": engine_name,
+        **({"layoutMode": layout_mode} if layout_mode else {}),
     }
-    docling_effective = {
-        "doclingVersion": "FAKE",
-        "pdfBackendEffective": docling_meta["pdfBackend"],
-        "tableModeEffective": docling_meta["tableStructureMode"],
-        "doCellMatchingEffective": docling_meta.get("doCellMatching"),
-        "acceleratorEffective": effective_device,
-        "fallbackReasons": [],
-    }
-    docling_caps = {
-        "doclingVersion": "FAKE",
-        "pdfBackends": ["dlparse_v2", "dlparse_v4"],
-        "tableModes": ["fast", "accurate"],
-        "tableStructureOptionsFields": ["mode", "do_cell_matching"],
-        "cudaAvailable": cuda_available,
-        "gpuName": "FAKE_GPU" if cuda_available else None,
-        "torchVersion": "FAKE",
-        "torchCudaVersion": "FAKE",
+    engine_effective = {
+        "name": engine_name,
+        **({"layoutMode": layout_mode} if layout_mode else {}),
+        **({"pymupdfVersion": "FAKE"} if engine_name != "docling" else {}),
+        **({"pymupdf4llmVersion": "FAKE"} if engine_name == "pymupdf4llm" else {}),
     }
 
     meta = {
@@ -353,7 +374,7 @@ def run_job(
             "timeoutSec": config["limits"]["processTimeoutSec"],
             "exitCode": 0,
             "selectedProfile": selected_profile,
-            "docling": docling_meta,
+            **({"docling": docling_processing} if docling_processing else {}),
             "accelerator": {
                 "requestedDevice": requested_device,
                 "effectiveDevice": effective_device,
@@ -372,10 +393,20 @@ def run_job(
                 "doclingVersion": "FAKE",
             },
         },
-        "docling": {
-            "requested": docling_requested,
-            "effective": docling_effective,
-            "capabilities": docling_caps,
+        **(
+            {
+                "docling": {
+                    "requested": docling_requested,
+                    "effective": docling_effective,
+                    "capabilities": docling_caps,
+                }
+            }
+            if docling_requested and docling_effective and docling_caps
+            else {}
+        ),
+        "engine": {
+            "requested": engine_requested,
+            "effective": engine_effective,
         },
         "outputs": outputs,
         "metrics": metrics,
@@ -393,12 +424,13 @@ def run_job(
     with open(meta_path, "w", encoding="utf-8") as handle:
         json.dump(meta, handle, indent=2)
     global LAST_JOB_PROOF
-    LAST_JOB_PROOF = {
-        "docId": doc_id,
-        "requested": docling_requested,
-        "effective": docling_effective,
-        "fallbackReasons": [],
-    }
+    if docling_requested and docling_effective:
+        LAST_JOB_PROOF = {
+            "docId": doc_id,
+            "requested": docling_requested,
+            "effective": docling_effective,
+            "fallbackReasons": [],
+        }
     return 0
 
 
@@ -445,6 +477,9 @@ def run_worker_loop() -> int:
         data_dir = message.get("dataDir")
         gates_path = message.get("gates")
         docling_config_path = message.get("doclingConfig")
+        pymupdf_config_path = message.get("pymupdfConfig")
+        engine = message.get("engine")
+        layout_mode = message.get("layoutMode")
         device_override = message.get("deviceOverride")
         if not job_id or not input_path or not doc_id or not data_dir or not gates_path:
             continue
@@ -455,6 +490,9 @@ def run_worker_loop() -> int:
             gates_path,
             job_id,
             docling_config_path,
+            pymupdf_config_path,
+            engine,
+            layout_mode,
             device_override,
             message.get("profile"),
         )
@@ -488,6 +526,9 @@ def main() -> int:
         args.gates,
         args.doc_id,
         args.docling_config,
+        None,
+        None,
+        None,
         None,
         None,
     )

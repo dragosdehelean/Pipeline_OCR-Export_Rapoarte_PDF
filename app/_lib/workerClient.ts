@@ -97,6 +97,9 @@ type WorkerJobOptions = {
   dataDir: string;
   gatesPath: string;
   doclingConfigPath: string;
+  pymupdfConfigPath: string;
+  engine?: "docling" | "pymupdf4llm" | "pymupdf_text";
+  layoutMode?: "layout" | "standard" | null;
   deviceOverride?: string | null;
   profile?: string | null;
   requestId: string;
@@ -674,6 +677,9 @@ const sendJob = (job: WorkerJob) => {
     dataDir: job.dataDir,
     gates: job.gatesPath,
     doclingConfig: job.doclingConfigPath,
+    pymupdfConfig: job.pymupdfConfigPath,
+    engine: job.engine ?? "docling",
+    layoutMode: job.layoutMode ?? undefined,
     deviceOverride: job.deviceOverride ?? undefined,
     profile: job.profile ?? undefined,
     requestId: job.requestId

@@ -17,7 +17,16 @@ export const metricsSchema = z
     mdChars: z.number(),
     textItems: z.number(),
     tables: z.number(),
-    textCharsPerPageAvg: z.number()
+    textCharsPerPageAvg: z.number(),
+    splitSpacing: z
+      .object({
+        score: z.number(),
+        suspicious: z.boolean(),
+        singleCharTokenRatio: z.number().optional(),
+        singleCharRuns: z.number().optional()
+      })
+      .strict()
+      .optional()
   })
   .strict();
 
@@ -114,6 +123,14 @@ export const metaDoclingSchema = z
     requested: doclingRequestedSchema,
     effective: doclingEffectiveSchema,
     capabilities: doclingCapabilitiesSchema.optional()
+  })
+  .strict();
+
+export const metaEngineSchema = z
+  .object({
+    requested: z.record(z.string(), z.unknown()),
+    effective: z.record(z.string(), z.unknown()),
+    capabilities: z.record(z.string(), z.unknown()).optional()
   })
   .strict();
 
@@ -215,6 +232,7 @@ export const metaFileSchema = z
     source: metaSourceSchema,
     processing: metaProcessingSchema,
     docling: metaDoclingSchema.optional(),
+    engine: metaEngineSchema.optional(),
     outputs: metaOutputsSchema,
     metrics: metricsSchema,
     qualityGates: metaQualityGatesSchema,

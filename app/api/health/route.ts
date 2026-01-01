@@ -4,6 +4,7 @@
 import { NextResponse } from "next/server";
 import {
   loadDoclingConfig,
+  loadPyMuPDFConfig,
   loadQualityGatesConfig,
   type QualityGatesConfig
 } from "../../_lib/config";
@@ -25,6 +26,12 @@ type HealthResponse = {
   docling: {
     defaultProfile: string;
     profiles: string[];
+  } | null;
+  pymupdf: {
+    engines: string[];
+    defaultEngine: string;
+    layoutModeDefault?: "layout" | "standard";
+    configError?: string;
   } | null;
   doclingWorker: DoclingWorkerSnapshot | null;
   config: {
@@ -50,6 +57,7 @@ export async function GET() {
   let config: HealthConfig | null = null;
   let configError: string | null = null;
   let docling: HealthResponse["docling"] = null;
+  let pymupdf: HealthResponse["pymupdf"] = null;
   let doclingConfigError: string | null = null;
   let doclingWorker: DoclingWorkerSnapshot | null = null;
 
@@ -77,6 +85,21 @@ export async function GET() {
       doclingConfigError =
         (error as Error).message || "Failed to load docling config.";
     }
+    try {
+      const pymupdfConfig = await loadPyMuPDFConfig();
+      pymupdf = {
+        engines: pymupdfConfig.engines,
+        defaultEngine: pymupdfConfig.defaultEngine,
+        layoutModeDefault: pymupdfConfig.pymupdf4llm.layoutModeDefault
+      };
+    } catch (error) {
+      pymupdf = {
+        engines: [],
+        defaultEngine: "docling",
+        configError:
+          (error as Error).message || "Failed to load pymupdf config."
+      };
+    }
 
     const pythonBin = process.env.PYTHON_BIN ?? "";
     const workerPath = process.env.DOCLING_WORKER ?? "";
@@ -96,6 +119,7 @@ export async function GET() {
     resolved,
     worker,
     docling,
+    pymupdf,
     doclingWorker,
     config,
     configError,

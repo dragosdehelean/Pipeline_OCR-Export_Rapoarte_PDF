@@ -7,6 +7,8 @@ import { NextResponse } from "next/server";
 import {
   getDoclingConfigPath,
   getGatesConfigPath,
+  getPyMuPDFConfigPath,
+  loadPyMuPDFConfig,
   loadQualityGatesConfig,
   type QualityGatesConfig
 } from "../../../_lib/config";
@@ -77,6 +79,8 @@ export async function POST(req: Request) {
   const file = formData.get("file");
   const deviceOverride = parseDeviceOverride(formData.get("deviceOverride"));
   const profileOverride = parseProfile(formData.get("profile"));
+  const requestedEngine = parseEngine(formData.get("engine"));
+  const requestedLayoutMode = parseLayoutMode(formData.get("layoutMode"));
 
   if (!isFileLike(file)) {
     return jsonError({
@@ -121,6 +125,42 @@ export async function POST(req: Request) {
   const id = generateDocId();
   const startedAt = new Date();
   const stageTimer = createStageTimer("UPLOAD", startedAt.getTime());
+
+  let engine = "docling";
+  let layoutMode: string | null = null;
+  if (requestedEngine || requestedLayoutMode) {
+    try {
+      const pymupdfConfig = await loadPyMuPDFConfig();
+      engine = requestedEngine ?? pymupdfConfig.defaultEngine ?? "docling";
+      if (!pymupdfConfig.engines.includes(engine)) {
+        return jsonError({
+          status: 400,
+          stage: "VALIDATION",
+          message: "Unsupported engine selection.",
+          requestId
+        });
+      }
+      layoutMode =
+        requestedLayoutMode ?? pymupdfConfig.pymupdf4llm.layoutModeDefault;
+    } catch (error) {
+      return jsonError({
+        status: 500,
+        stage: "CONFIG",
+        message: (error as Error).message || "Failed to load pymupdf config.",
+        requestId
+      });
+    }
+  }
+
+  const isPdf = mimeType === "application/pdf";
+  if (!isPdf && engine !== "docling") {
+    return jsonError({
+      status: 400,
+      stage: "VALIDATION",
+      message: "Selected engine requires a PDF upload.",
+      requestId
+    });
+  }
 
   await ensureDataDirs();
   await fs.mkdir(getDocExportDir(id), { recursive: true });
@@ -268,6 +308,9 @@ export async function POST(req: Request) {
     dataDir: getDataDir(),
     gatesPath: getGatesConfigPath(),
     doclingConfigPath: getDoclingConfigPath(),
+    pymupdfConfigPath: getPyMuPDFConfigPath(),
+    engine,
+    layoutMode: engine === "pymupdf4llm" ? layoutMode : null,
     deviceOverride,
     profile: profileOverride,
     requestId,
@@ -296,6 +339,7 @@ export async function POST(req: Request) {
         progressState
       });
       logDoclingProof(meta);
+      logEngineProof(meta);
       const timingLog = formatStageTimingsLog({
         docId: id,
         requestId,
@@ -668,6 +712,32 @@ function parseProfile(value: FormDataEntryValue | null) {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function parseEngine(value: FormDataEntryValue | null) {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (
+    normalized === "docling" ||
+    normalized === "pymupdf4llm" ||
+    normalized === "pymupdf_text"
+  ) {
+    return normalized;
+  }
+  return null;
+}
+
+function parseLayoutMode(value: FormDataEntryValue | null) {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "layout" || normalized === "standard") {
+    return normalized;
+  }
+  return null;
+}
+
 function resolveStartedAt(meta: MetaFile, fallback: Date) {
   const startedAt = meta.processing.startedAt;
   if (typeof startedAt === "string") {
@@ -798,6 +868,22 @@ function logDoclingProof(meta: MetaFile) {
     effective
   };
   console.info(`INGEST_META ${JSON.stringify(payload)}`);
+}
+
+function logEngineProof(meta: MetaFile) {
+  const requested = meta.engine?.requested ?? null;
+  const effective = meta.engine?.effective ?? null;
+  if (!requested && !effective) {
+    return;
+  }
+  const payload = {
+    event: "ingest_engine_effective",
+    docId: meta.id,
+    requestId: meta.requestId,
+    requested,
+    effective
+  };
+  console.info(`INGEST_ENGINE_EFFECTIVE ${JSON.stringify(payload)}`);
 }
 
 function appendLogLineToMeta(meta: MetaFile, line: string, maxBytes: number): MetaFile {

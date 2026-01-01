@@ -31,6 +31,17 @@ type HealthDocling = {
   profiles: string[];
 };
 
+type EngineName = "docling" | "pymupdf4llm" | "pymupdf_text";
+
+type LayoutMode = "layout" | "standard";
+
+type HealthPyMuPDF = {
+  engines: EngineName[];
+  defaultEngine: EngineName;
+  layoutModeDefault?: LayoutMode;
+  configError?: string;
+};
+
 type HealthPayload = {
   ok?: boolean;
   missingEnv?: string[];
@@ -38,6 +49,7 @@ type HealthPayload = {
   configError?: string | null;
   docling?: HealthDocling | null;
   doclingConfigError?: string | null;
+  pymupdf?: HealthPyMuPDF | null;
 };
 
 type UploadError = {
@@ -65,6 +77,8 @@ type UploadRequest = {
   file: File;
   deviceOverride: DeviceOverride;
   profile: string | null;
+  engine: EngineName;
+  layoutMode: LayoutMode | null;
 };
 
 type UploadResult = {
@@ -216,6 +230,8 @@ export default function UploadForm() {
   );
   const [isBenchmarking, setIsBenchmarking] = useState(false);
   const [profileOverride, setProfileOverride] = useState<string | null>(null);
+  const [engine, setEngine] = useState<EngineName>("docling");
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>("layout");
   const lastStatusRef = useRef<ProcessingState["status"] | null>(null);
 
   const healthQuery = useQuery({
@@ -228,8 +244,13 @@ export default function UploadForm() {
     ok: healthPayload?.ok === true && !healthQuery.isError,
     missingEnv: Array.isArray(healthPayload?.missingEnv) ? healthPayload?.missingEnv : [],
     config: healthPayload?.config ?? null,
-    configError: healthPayload?.configError ?? healthPayload?.doclingConfigError ?? null,
-    docling: healthPayload?.docling ?? null
+    configError:
+      healthPayload?.configError ??
+      healthPayload?.doclingConfigError ??
+      healthPayload?.pymupdf?.configError ??
+      null,
+    docling: healthPayload?.docling ?? null,
+    pymupdf: healthPayload?.pymupdf ?? null
   };
 
   const acceptExtensions = health.config?.accept?.extensions ?? [];
@@ -256,12 +277,52 @@ export default function UploadForm() {
         ? defaultProfile
         : doclingProfiles[0]) || null;
 
+  const selectedExtension = selectedFile ? getFileExtension(selectedFile.name) : "";
+  const isPdf =
+    selectedFile?.type === "application/pdf" || selectedExtension === ".pdf";
+  const isDocx =
+    selectedFile?.type ===
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+    selectedExtension === ".docx";
+
+  const availableEngines = useMemo<EngineName[]>(() => {
+    if (!isPdf) {
+      return ["docling"];
+    }
+    const engines = health.pymupdf?.engines ?? [];
+    return engines.length ? engines : ["docling"];
+  }, [health.pymupdf?.engines, isPdf]);
+  const availableEnginesKey = availableEngines.join("|");
+  const defaultEngine = (() => {
+    const candidate = health.pymupdf?.defaultEngine ?? "docling";
+    if (availableEngines.includes(candidate)) {
+      return candidate;
+    }
+    return availableEngines[0] ?? "docling";
+  })();
+  const defaultLayoutMode =
+    health.pymupdf?.layoutModeDefault ?? "layout";
+
   useEffect(() => {
     if (!defaultProfile) {
       return;
     }
     setProfileOverride((current) => current ?? defaultProfile);
   }, [defaultProfile]);
+
+  useEffect(() => {
+    if (!isPdf) {
+      setEngine("docling");
+      return;
+    }
+    setEngine((current) =>
+      availableEngines.includes(current) ? current : defaultEngine
+    );
+  }, [availableEnginesKey, defaultEngine, isPdf]);
+
+  useEffect(() => {
+    setLayoutMode(defaultLayoutMode);
+  }, [defaultLayoutMode]);
 
   const clearSelectedFile = () => {
     setSelectedFile(null);
@@ -277,6 +338,10 @@ export default function UploadForm() {
       const formData = new FormData();
       formData.append("file", request.file);
       formData.append("deviceOverride", request.deviceOverride);
+      formData.append("engine", request.engine);
+      if (request.layoutMode) {
+        formData.append("layoutMode", request.layoutMode);
+      }
       if (request.profile) {
         formData.append("profile", request.profile);
       }
@@ -413,7 +478,9 @@ export default function UploadForm() {
       await uploadMutation.mutateAsync({
         file,
         deviceOverride,
-        profile: resolvedProfile
+        profile: resolvedProfile,
+        engine: isPdf ? engine : "docling",
+        layoutMode: engine === "pymupdf4llm" ? layoutMode : null
       });
     } catch (err) {
       setError({ message: "Upload failed. Check the console for details." });
@@ -513,6 +580,9 @@ export default function UploadForm() {
   const isReady = !health.loading && health.ok;
   const maxPages = health.config?.limits?.maxPages ?? null;
   const timeoutSec = health.config?.limits?.processTimeoutSec ?? null;
+  const isDoclingEngine = engine === "docling";
+  const showEngineSelector = isPdf || !selectedFile;
+  const canUseDoclingControls = isDoclingEngine;
   const canUpload =
     isReady &&
     !!selectedFile &&
@@ -523,6 +593,7 @@ export default function UploadForm() {
   const canBenchmark =
     isReady &&
     !!selectedFile &&
+    canUseDoclingControls &&
     !isUploading &&
     !isBenchmarking &&
     !isFileTooLarge &&
@@ -576,7 +647,9 @@ export default function UploadForm() {
       const cpuUpload = await uploadMutation.mutateAsync({
         file: selectedFile,
         deviceOverride: "cpu",
-        profile: resolvedProfile
+        profile: resolvedProfile,
+        engine: "docling",
+        layoutMode: null
       });
       if (!cpuUpload.ok) {
         throw new Error("CPU benchmark upload failed.");
@@ -590,7 +663,9 @@ export default function UploadForm() {
       const cudaUpload = await uploadMutation.mutateAsync({
         file: selectedFile,
         deviceOverride: "cuda",
-        profile: resolvedProfile
+        profile: resolvedProfile,
+        engine: "docling",
+        layoutMode: null
       });
       if (!cudaUpload.ok) {
         throw new Error("CUDA benchmark upload failed.");
@@ -628,6 +703,7 @@ export default function UploadForm() {
             <li>Set `PYTHON_BIN`, `DOCLING_WORKER`, `DATA_DIR`</li>
             <li>Set `GATES_CONFIG_PATH` to `config/quality-gates.json`</li>
             <li>Set `DOCLING_CONFIG_PATH` to `config/docling.json` (optional)</li>
+            <li>Set `PYMUPDF_CONFIG_PATH` to `config/pymupdf.json` (optional)</li>
             <li>Restart `npm run dev` after editing `.env.local`</li>
           </ul>
           {health.missingEnv.length > 0 ? (
@@ -642,7 +718,7 @@ export default function UploadForm() {
       ) : null}
       <div className="upload-header">
         <strong>Upload PDF/DOCX</strong>
-        <div className="note">Docling-only, strict quality gates.</div>
+        <div className="note">Configurable engines with strict quality gates.</div>
       </div>
       {processingState ? (
         <div
@@ -742,6 +818,44 @@ export default function UploadForm() {
       <details className="advanced-panel">
         <summary>Advanced</summary>
         <div className="upload-requirements">
+          {showEngineSelector ? (
+            <div>
+              <span className="label">Engine:</span>{" "}
+              <select
+                id="engine-override"
+                value={engine}
+                onChange={(event) => setEngine(event.target.value as EngineName)}
+                disabled={isUploading || isBenchmarking || !isPdf}
+              >
+                {availableEngines.map((engineOption) => (
+                  <option key={engineOption} value={engineOption}>
+                    {engineOption === "docling"
+                      ? "Docling"
+                      : engineOption === "pymupdf4llm"
+                        ? "PyMuPDF4LLM"
+                        : "PyMuPDF (text flags)"}
+                  </option>
+                ))}
+              </select>
+              {isDocx ? (
+                <span className="note"> Docling is required for DOCX.</span>
+              ) : null}
+            </div>
+          ) : null}
+          {engine === "pymupdf4llm" && isPdf ? (
+            <div>
+              <span className="label">Layout mode:</span>{" "}
+              <select
+                id="layout-mode"
+                value={layoutMode}
+                onChange={(event) => setLayoutMode(event.target.value as LayoutMode)}
+                disabled={isUploading || isBenchmarking}
+              >
+                <option value="layout">Layout</option>
+                <option value="standard">Standard</option>
+              </select>
+            </div>
+          ) : null}
           <div>
             <span className="label">Device:</span>{" "}
             <select
@@ -750,12 +864,15 @@ export default function UploadForm() {
               onChange={(event) =>
                 setDeviceOverride(event.target.value as DeviceOverride)
               }
-              disabled={isUploading || isBenchmarking}
+              disabled={isUploading || isBenchmarking || !canUseDoclingControls}
             >
               <option value="auto">Auto</option>
               <option value="cpu">CPU</option>
               <option value="cuda">CUDA</option>
             </select>
+            {!canUseDoclingControls ? (
+              <span className="note"> Docling-only (ignored by PyMuPDF).</span>
+            ) : null}
           </div>
           {doclingProfiles.length ? (
             <div>
@@ -764,7 +881,7 @@ export default function UploadForm() {
                 id="profile-override"
                 value={resolvedProfile ?? ""}
                 onChange={(event) => setProfileOverride(event.target.value)}
-                disabled={isUploading || isBenchmarking}
+                disabled={isUploading || isBenchmarking || !canUseDoclingControls}
               >
                 {doclingProfiles.map((profile) => (
                   <option key={profile} value={profile}>
@@ -772,6 +889,9 @@ export default function UploadForm() {
                   </option>
                 ))}
               </select>
+              {!canUseDoclingControls ? (
+                <span className="note"> Docling-only (ignored by PyMuPDF).</span>
+              ) : null}
             </div>
           ) : null}
           {acceleratorMeta ? (

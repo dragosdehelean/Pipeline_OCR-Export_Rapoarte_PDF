@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "defaultEngine": "docling",
+  "engines": ["docling", "pymupdf4llm", "pymupdf_text"],
+  "pymupdf_text": {
+    "textFlags": [
+      "TEXT_INHIBIT_SPACES",
+      "TEXT_PRESERVE_WHITESPACE",
+      "TEXT_PRESERVE_LIGATURES"
+    ],
+    "getTextKind": "text"
+  },
+  "pymupdf4llm": {
+    "layoutModeDefault": "layout",
+    "layoutEnabled": true,
+    "toMarkdown": {
+      "write_images": false,
+      "embed_images": false,
+      "dpi": 150,
+      "page_chunks": true,
+      "extract_words": false,
+      "force_text": false,
+      "show_progress": false,
+      "margins": 0,
+      "table_strategy": "lines_strict",
+      "graphics_limit": 0,
+      "ignore_code": false,
+      "extract_tables": true
+    }
+  },
+  "splitDetection": {
+    "enabled": true,
+    "singleCharTokenRatioThreshold": 0.25,
+    "minTokenCount": 40,
+    "minSingleCharRun": 6
+  }
+}

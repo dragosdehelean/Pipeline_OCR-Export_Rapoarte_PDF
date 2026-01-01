@@ -1,12 +1,12 @@
 <!-- @fileoverview Repository instructions for the Doc Ingestion & Export project. -->
-# Doc Ingestion & Export (Docling-only)
+# Doc Ingestion & Export
 
 ## 0) Project overview
 
 A **local-first** ingestion pipeline for **PDF/DOCX** documents and exports **Markdown + JSON** artifacts as a prerequisite step for downstream RAG (no embeddings/vector store/chunking here yet).  
 
 - **Next.js (App Router)** provides the UI and API Route Handlers (upload, orchestration, serving artifacts).
-- A **Python worker** runs **Docling** to convert documents, compute metrics, evaluate quality gates, and write artifacts.
+- A **Python worker** runs **Docling** or **PyMuPDF** engines to convert documents, compute metrics, evaluate quality gates, and write artifacts.
 
 ## 1) Core commands (copy/paste)
 > Use the repo scripts. If a script is missing, **add it** to `package.json` (don’t invent ad-hoc commands).
@@ -36,7 +36,7 @@ Python worker:
 ### Application
 - **Frontend/UI:** Next.js (App Router) + React + TypeScript
 - **Server/API:** Next.js Route Handlers (Node runtime)
-- **Doc processing worker:** Python CLI worker using **Docling**
+- **Doc processing worker:** Python CLI worker using **Docling** + **PyMuPDF** engines
 - **Storage:** Local filesystem under `DATA_DIR` (`data/uploads/`, `data/exports/<id>/`)
 
 ### Config & contracts
@@ -85,6 +85,12 @@ Python worker:
 ### meta.json is the contract
 - `meta.json` is written **always** (SUCCESS or FAILED).
 - The UI must render status, metrics, and gate results **from meta.json**.
+
+### Engines
+- Docling (default)
+- PyMuPDF4LLM (layout/standard)
+- PyMuPDF text flags
+- `pymupdf4llm.show_progress` must remain disabled because worker stdout is JSONL; UI uses worker progress events.
 
 ## 6) Per-document artifacts
 For each ingested document `id`:
