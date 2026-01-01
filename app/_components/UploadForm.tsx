@@ -39,6 +39,11 @@ type HealthPyMuPDF = {
   engines: EngineName[];
   defaultEngine: EngineName;
   layoutModeDefault?: LayoutMode;
+  availability?: {
+    pymupdf_text: { available: boolean; reason?: string | null };
+    pymupdf4llm: { available: boolean; reason?: string | null };
+    layout: { available: boolean; reason?: string | null };
+  };
   configError?: string;
 };
 
@@ -293,13 +298,32 @@ export default function UploadForm() {
     return engines.length ? engines : ["docling"];
   }, [health.pymupdf?.engines, isPdf]);
   const availableEnginesKey = availableEngines.join("|");
+  const engineAvailability = health.pymupdf?.availability ?? null;
+  const isEngineAvailable = (engineName: EngineName) => {
+    if (engineName === "docling") {
+      return true;
+    }
+    if (!engineAvailability) {
+      return false;
+    }
+    if (engineName === "pymupdf_text") {
+      return engineAvailability.pymupdf_text.available;
+    }
+    return engineAvailability.pymupdf4llm.available;
+  };
+  const enabledEngines = availableEngines.filter((engineName) =>
+    isEngineAvailable(engineName)
+  );
   const defaultEngine = (() => {
     const candidate = health.pymupdf?.defaultEngine ?? "docling";
-    if (availableEngines.includes(candidate)) {
+    if (availableEngines.includes(candidate) && isEngineAvailable(candidate)) {
       return candidate;
     }
-    return availableEngines[0] ?? "docling";
+    return enabledEngines[0] ?? "docling";
   })();
+  const layoutAvailable =
+    engineAvailability?.layout.available ??
+    (engineAvailability ? false : true);
   const defaultLayoutMode =
     health.pymupdf?.layoutModeDefault ?? "layout";
 
@@ -316,13 +340,19 @@ export default function UploadForm() {
       return;
     }
     setEngine((current) =>
-      availableEngines.includes(current) ? current : defaultEngine
+      availableEngines.includes(current) && isEngineAvailable(current)
+        ? current
+        : defaultEngine
     );
-  }, [availableEnginesKey, defaultEngine, isPdf]);
+  }, [availableEnginesKey, defaultEngine, isPdf, engineAvailability]);
 
   useEffect(() => {
+    if (!layoutAvailable) {
+      setLayoutMode("standard");
+      return;
+    }
     setLayoutMode(defaultLayoutMode);
-  }, [defaultLayoutMode]);
+  }, [defaultLayoutMode, layoutAvailable]);
 
   const clearSelectedFile = () => {
     setSelectedFile(null);
@@ -828,7 +858,11 @@ export default function UploadForm() {
                 disabled={isUploading || isBenchmarking || !isPdf}
               >
                 {availableEngines.map((engineOption) => (
-                  <option key={engineOption} value={engineOption}>
+                  <option
+                    key={engineOption}
+                    value={engineOption}
+                    disabled={!isEngineAvailable(engineOption)}
+                  >
                     {engineOption === "docling"
                       ? "Docling"
                       : engineOption === "pymupdf4llm"
@@ -839,6 +873,12 @@ export default function UploadForm() {
               </select>
               {isDocx ? (
                 <span className="note"> Docling is required for DOCX.</span>
+              ) : null}
+              {!isEngineAvailable(engine) ? (
+                <span className="note">
+                  {" "}
+                  Engine unavailable: update worker deps.
+                </span>
               ) : null}
             </div>
           ) : null}
@@ -851,7 +891,9 @@ export default function UploadForm() {
                 onChange={(event) => setLayoutMode(event.target.value as LayoutMode)}
                 disabled={isUploading || isBenchmarking}
               >
-                <option value="layout">Layout</option>
+                <option value="layout" disabled={!layoutAvailable}>
+                  Layout
+                </option>
                 <option value="standard">Standard</option>
               </select>
             </div>

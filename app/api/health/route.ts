@@ -31,6 +31,11 @@ type HealthResponse = {
     engines: string[];
     defaultEngine: string;
     layoutModeDefault?: "layout" | "standard";
+    availability?: {
+      pymupdf_text: { available: boolean; reason?: string | null };
+      pymupdf4llm: { available: boolean; reason?: string | null };
+      layout: { available: boolean; reason?: string | null };
+    };
     configError?: string;
   } | null;
   doclingWorker: DoclingWorkerSnapshot | null;
@@ -46,6 +51,7 @@ type HealthResponse = {
 };
 
 type HealthConfig = NonNullable<HealthResponse["config"]>;
+type PyMuPDFAvailability = NonNullable<HealthResponse["pymupdf"]>["availability"];
 
 /**
  * Returns readiness info for UI gating and setup checks.
@@ -60,6 +66,7 @@ export async function GET() {
   let pymupdf: HealthResponse["pymupdf"] = null;
   let doclingConfigError: string | null = null;
   let doclingWorker: DoclingWorkerSnapshot | null = null;
+  let pymupdfAvailability: PyMuPDFAvailability | null = null;
 
   if (missingEnv.length === 0) {
     try {
@@ -109,6 +116,7 @@ export async function GET() {
         workerPath
       });
     }
+    pymupdfAvailability = buildPyMuPDFAvailability(doclingWorker);
   }
 
   const ok = missingEnv.length === 0 && !configError && !doclingConfigError;
@@ -119,10 +127,42 @@ export async function GET() {
     resolved,
     worker,
     docling,
-    pymupdf,
+    pymupdf: pymupdf
+      ? {
+          ...pymupdf,
+          availability: pymupdfAvailability ?? undefined
+        }
+      : null,
     doclingWorker,
     config,
     configError,
     doclingConfigError
   });
+}
+
+function buildPyMuPDFAvailability(
+  worker: DoclingWorkerSnapshot | null
+): PyMuPDFAvailability | null {
+  const availability = worker?.capabilities?.pymupdf ?? null;
+  if (!availability) {
+    return {
+      pymupdf_text: { available: false, reason: "WORKER_CAPABILITIES_UNAVAILABLE" },
+      pymupdf4llm: { available: false, reason: "WORKER_CAPABILITIES_UNAVAILABLE" },
+      layout: { available: false, reason: "WORKER_CAPABILITIES_UNAVAILABLE" }
+    };
+  }
+  return {
+    pymupdf_text: {
+      available: availability.pymupdf.available,
+      reason: availability.pymupdf.reason ?? null
+    },
+    pymupdf4llm: {
+      available: availability.pymupdf4llm.available,
+      reason: availability.pymupdf4llm.reason ?? null
+    },
+    layout: {
+      available: availability.layout.available,
+      reason: availability.layout.reason ?? null
+    }
+  };
 }

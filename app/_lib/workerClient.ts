@@ -29,6 +29,19 @@ export type DoclingCapabilities = {
   gpuName?: string | null;
   torchVersion?: string | null;
   torchCudaVersion?: string | null;
+  pymupdf?: PyMuPDFCapabilities;
+};
+
+export type PyMuPDFAvailability = {
+  available: boolean;
+  reason?: string | null;
+  version?: string | null;
+};
+
+export type PyMuPDFCapabilities = {
+  pymupdf: PyMuPDFAvailability;
+  pymupdf4llm: PyMuPDFAvailability;
+  layout: PyMuPDFAvailability;
 };
 
 export type DoclingJobProof = {
@@ -834,6 +847,7 @@ const parseCapabilities = (value: unknown): DoclingCapabilities | null => {
   if (!doclingVersion || !pdfBackends || !tableModes) {
     return null;
   }
+  const pymupdf = parsePyMuPDFCapabilities(value.pymupdf);
   return {
     doclingVersion,
     pdfBackends,
@@ -845,8 +859,37 @@ const parseCapabilities = (value: unknown): DoclingCapabilities | null => {
     gpuName: typeof value.gpuName === "string" ? value.gpuName : null,
     torchVersion: typeof value.torchVersion === "string" ? value.torchVersion : null,
     torchCudaVersion:
-      typeof value.torchCudaVersion === "string" ? value.torchCudaVersion : null
+      typeof value.torchCudaVersion === "string" ? value.torchCudaVersion : null,
+    ...(pymupdf ? { pymupdf } : {})
   };
+};
+
+const parsePyMuPDFAvailability = (value: unknown): PyMuPDFAvailability | null => {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const available = typeof value.available === "boolean" ? value.available : null;
+  if (available === null) {
+    return null;
+  }
+  return {
+    available,
+    reason: typeof value.reason === "string" ? value.reason : null,
+    version: typeof value.version === "string" ? value.version : null
+  };
+};
+
+const parsePyMuPDFCapabilities = (value: unknown): PyMuPDFCapabilities | null => {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const pymupdf = parsePyMuPDFAvailability(value.pymupdf);
+  const pymupdf4llm = parsePyMuPDFAvailability(value.pymupdf4llm);
+  const layout = parsePyMuPDFAvailability(value.layout);
+  if (!pymupdf || !pymupdf4llm || !layout) {
+    return null;
+  }
+  return { pymupdf, pymupdf4llm, layout };
 };
 
 const parseLastJob = (value: unknown): DoclingJobProof | null => {

@@ -401,6 +401,48 @@ def get_docling_capabilities() -> Dict[str, Any]:
     return dict(capabilities)
 
 
+def check_module_available(module_name: str) -> Tuple[bool, Optional[str]]:
+    """Checks whether a module can be imported."""
+    try:
+        importlib.import_module(module_name)
+        return True, None
+    except Exception:
+        reason = f"IMPORT_{module_name.upper().replace('.', '_')}_FAILED"
+        return False, reason
+
+
+def get_pymupdf_capabilities() -> Dict[str, Any]:
+    """Returns PyMuPDF engine availability with reasons."""
+    pymupdf_ok, pymupdf_reason = check_module_available("pymupdf")
+    pymupdf4llm_ok, pymupdf4llm_reason = check_module_available("pymupdf4llm")
+    layout_ok, layout_reason = check_module_available("pymupdf.layout")
+    return {
+        "pymupdf": {
+            "available": pymupdf_ok,
+            "reason": pymupdf_reason,
+            "version": get_pymupdf_version() if pymupdf_ok else "UNKNOWN",
+        },
+        "pymupdf4llm": {
+            "available": pymupdf_ok and pymupdf4llm_ok,
+            "reason": pymupdf4llm_reason if not pymupdf4llm_ok else pymupdf_reason,
+            "version": get_pymupdf4llm_version()
+            if pymupdf_ok and pymupdf4llm_ok
+            else "UNKNOWN",
+        },
+        "layout": {
+            "available": pymupdf_ok and layout_ok,
+            "reason": layout_reason if not layout_ok else pymupdf_reason,
+        },
+    }
+
+
+def get_worker_capabilities() -> Dict[str, Any]:
+    """Returns combined worker capabilities for docling and PyMuPDF engines."""
+    capabilities = get_docling_capabilities()
+    capabilities["pymupdf"] = get_pymupdf_capabilities()
+    return capabilities
+
+
 def resolve_docling_config_path(docling_path: Optional[str]) -> Optional[str]:
     """Resolves the Docling config path from args or env defaults."""
     candidate = docling_path or os.getenv("DOCLING_CONFIG_PATH")
@@ -1684,7 +1726,7 @@ def run_worker_loop() -> int:
                 {
                     "event": "capabilities",
                     "requestId": message.get("requestId"),
-                    "capabilities": get_docling_capabilities(),
+                    "capabilities": get_worker_capabilities(),
                     "lastJob": LAST_JOB_PROOF,
                 }
             )

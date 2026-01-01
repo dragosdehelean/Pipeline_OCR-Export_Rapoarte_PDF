@@ -19,7 +19,7 @@ Node / Next.js:
 - E2E: `npm run test:e2e`
 
 Python worker:
-  - Install deps: `cd services/docling_worker` then `uv sync --locked`
+  - Install deps: `cd services/docling_worker` then `uv sync --locked --group test`
   - Tests: `cd services/docling_worker` then `uv run pytest -q`
 
 ## 2) Repo map (where things go)

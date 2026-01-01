@@ -406,3 +406,24 @@ def test_compute_split_spacing_handles_empty_tokens():
     result = convert.compute_split_spacing(["   "], config)
     assert result is not None
     assert result["score"] == 0.0
+
+
+def test_check_module_available_missing():
+    ok, reason = convert.check_module_available("missing_module_for_test")
+    assert ok is False
+    assert reason == "IMPORT_MISSING_MODULE_FOR_TEST_FAILED"
+
+
+def test_get_pymupdf_capabilities_shapes():
+    caps = convert.get_pymupdf_capabilities()
+    assert "pymupdf" in caps
+    assert "pymupdf4llm" in caps
+    assert "layout" in caps
+
+
+def test_normalize_pymupdf4llm_result_dict():
+    markdown, chunks = convert.normalize_pymupdf4llm_result(
+        {"markdown": "md", "page_chunks": {"page": 1}}
+    )
+    assert markdown == "md"
+    assert chunks == {"page": 1}
