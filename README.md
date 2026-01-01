@@ -41,7 +41,7 @@ Create a worker venv and sync deps:
 ```
 cd services/docling_worker
 uv venv
-uv sync --group test
+uv sync --locked --group test
 ```
 Run worker tests:
 ```
@@ -106,7 +106,8 @@ $env:UX_AUDIT_BASE_URL="http://127.0.0.1:3000"; npm run test:ux
 ```
 Python tests:
 ```
-python -m pytest -q --cov=services/docling_worker
+cd services/docling_worker
+uv run pytest -q
 ```
 
 ## Processing profile

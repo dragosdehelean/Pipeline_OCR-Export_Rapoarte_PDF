@@ -19,8 +19,8 @@ Node / Next.js:
 - E2E: `npm run test:e2e`
 
 Python worker:
-- Install deps: `pip install -r services/docling_worker/requirements.txt`
-- Tests: `python -m pytest -q`
+  - Install deps: `cd services/docling_worker` then `uv sync --locked`
+  - Tests: `cd services/docling_worker` then `uv run pytest -q`
 
 ## 2) Repo map (where things go)
 - Next.js app + route handlers: `app/` (and/or `src/` if present)
@@ -31,7 +31,7 @@ Python worker:
 
 ## 3) Tech Stack
 
-> Keep this section accurate. Prefer **pinning versions** in the repo (e.g., `.nvmrc`, `package.json#engines`, `.python-version`, `requirements.txt`) and update this list when they change.
+> Keep this section accurate. Prefer **pinning versions** in the repo (e.g., `.nvmrc`, `package.json#engines`, `.python-version`, `uv.lock`) and update this list when they change.
 
 ### Application
 - **Frontend/UI:** Next.js (App Router) + React + TypeScript
