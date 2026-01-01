@@ -8,7 +8,12 @@ import {
   type QualityGatesConfig
 } from "../../_lib/config";
 import { getMissingEnv, getResolvedRuntimeEnv } from "../../_lib/env";
-import { getWorkerStatus, type WorkerStatusSnapshot } from "../../_lib/workerClient";
+import {
+  getWorkerCapabilities,
+  getWorkerStatus,
+  type DoclingWorkerSnapshot,
+  type WorkerStatusSnapshot
+} from "../../_lib/workerClient";
 
 export const runtime = "nodejs";
 
@@ -21,6 +26,7 @@ type HealthResponse = {
     defaultProfile: string;
     profiles: string[];
   } | null;
+  doclingWorker: DoclingWorkerSnapshot | null;
   config: {
     accept: QualityGatesConfig["accept"];
     limits: Pick<
@@ -45,6 +51,7 @@ export async function GET() {
   let configError: string | null = null;
   let docling: HealthResponse["docling"] = null;
   let doclingConfigError: string | null = null;
+  let doclingWorker: DoclingWorkerSnapshot | null = null;
 
   if (missingEnv.length === 0) {
     try {
@@ -70,6 +77,15 @@ export async function GET() {
       doclingConfigError =
         (error as Error).message || "Failed to load docling config.";
     }
+
+    const pythonBin = process.env.PYTHON_BIN ?? "";
+    const workerPath = process.env.DOCLING_WORKER ?? "";
+    if (pythonBin && workerPath) {
+      doclingWorker = await getWorkerCapabilities({
+        pythonBin,
+        workerPath
+      });
+    }
   }
 
   const ok = missingEnv.length === 0 && !configError && !doclingConfigError;
@@ -80,6 +96,7 @@ export async function GET() {
     resolved,
     worker,
     docling,
+    doclingWorker,
     config,
     configError,
     doclingConfigError

@@ -20,6 +20,30 @@ export type WorkerPrewarmInfo = {
   reason?: string;
 };
 
+export type DoclingCapabilities = {
+  doclingVersion: string;
+  pdfBackends: string[];
+  tableModes: string[];
+  tableStructureOptionsFields?: string[];
+  cudaAvailable?: boolean | null;
+  gpuName?: string | null;
+  torchVersion?: string | null;
+  torchCudaVersion?: string | null;
+};
+
+export type DoclingJobProof = {
+  docId: string;
+  requested: Record<string, unknown>;
+  effective: Record<string, unknown>;
+  fallbackReasons?: string[];
+};
+
+export type DoclingWorkerSnapshot = {
+  capabilities: DoclingCapabilities | null;
+  lastJob: DoclingJobProof | null;
+  error?: string;
+};
+
 export type WorkerProgressUpdate = {
   jobId?: string;
   stage?: string;
@@ -123,6 +147,12 @@ type WorkerState = {
   startResolve: ((value: WorkerStatusSnapshot) => void) | null;
   startReject: ((error: WorkerJobError) => void) | null;
   shutdownHandlersRegistered: boolean;
+  capabilitiesRequest: {
+    requestId: string;
+    resolve: (value: DoclingWorkerSnapshot) => void;
+    reject: (error: WorkerJobError) => void;
+    timeoutHandle: NodeJS.Timeout | null;
+  } | null;
 };
 
 const getWorkerState = (): WorkerState => {
@@ -145,7 +175,8 @@ const getWorkerState = (): WorkerState => {
       startPromise: null,
       startResolve: null,
       startReject: null,
-      shutdownHandlersRegistered: false
+      shutdownHandlersRegistered: false,
+      capabilitiesRequest: null
     };
   }
   return globalState.__DOC_WORKER__;
@@ -160,6 +191,8 @@ type WorkerDeps = {
 
 let workerDepsPromise: Promise<WorkerDeps> | null = null;
 const DEFAULT_STARTUP_TIMEOUT_MS = 30000;
+const DEFAULT_CAPABILITIES_TIMEOUT_MS = 2000;
+let capabilitiesRequestCounter = 0;
 
 const loadWorkerDeps = async (): Promise<WorkerDeps> => {
   if (!workerDepsPromise) {
@@ -246,6 +279,67 @@ export async function submitWorkerJob(options: WorkerJobOptions): Promise<Worker
     spawnedThisRequest: startup.spawnedThisCall,
     pythonStartupMs: startup.pythonStartupMs
   });
+}
+
+/**
+ * Requests Docling capabilities and last job info from the worker.
+ */
+export async function getWorkerCapabilities(options: {
+  pythonBin: string;
+  workerPath: string;
+  timeoutMs?: number;
+}): Promise<DoclingWorkerSnapshot> {
+  try {
+    await getWorker({ pythonBin: options.pythonBin, workerPath: options.workerPath });
+  } catch (error) {
+    return {
+      capabilities: null,
+      lastJob: null,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+
+  if (state.capabilitiesRequest) {
+    return {
+      capabilities: null,
+      lastJob: null,
+      error: "Capabilities request already in flight."
+    };
+  }
+
+  const requestId = `cap-${capabilitiesRequestCounter++}`;
+  const timeoutMs = options.timeoutMs ?? DEFAULT_CAPABILITIES_TIMEOUT_MS;
+
+  return new Promise<DoclingWorkerSnapshot>((resolve, reject) => {
+    const timeoutHandle = setTimeout(() => {
+      if (state.capabilitiesRequest?.requestId !== requestId) {
+        return;
+      }
+      state.capabilitiesRequest = null;
+      reject(new WorkerJobError("WORKER_PROTOCOL", "Capabilities request timed out."));
+    }, timeoutMs);
+
+    state.capabilitiesRequest = {
+      requestId,
+      resolve,
+      reject,
+      timeoutHandle
+    };
+
+    try {
+      state.workerProcess?.stdin.write(
+        JSON.stringify({ type: "capabilities", requestId }) + "\n"
+      );
+    } catch (error) {
+      clearTimeout(timeoutHandle);
+      state.capabilitiesRequest = null;
+      reject(new WorkerJobError("WORKER_PROTOCOL", "Failed to request capabilities."));
+    }
+  }).catch((error): DoclingWorkerSnapshot => ({
+    capabilities: null,
+    lastJob: null,
+    error: error instanceof Error ? error.message : String(error)
+  }));
 }
 
 /**
@@ -511,6 +605,22 @@ const handleWorkerLine = (line: string) => {
     return;
   }
 
+  if (event === "capabilities") {
+    const requestId = typeof payload.requestId === "string" ? payload.requestId : null;
+    const pending = state.capabilitiesRequest;
+    if (pending && requestId && pending.requestId === requestId) {
+      if (pending.timeoutHandle) {
+        clearTimeout(pending.timeoutHandle);
+      }
+      state.capabilitiesRequest = null;
+      pending.resolve({
+        capabilities: parseCapabilities(payload.capabilities),
+        lastJob: parseLastJob(payload.lastJob)
+      });
+    }
+    return;
+  }
+
   const jobId = typeof payload.jobId === "string" ? payload.jobId : undefined;
   const job = state.activeJob;
   if (!job || (jobId && jobId !== job.docId)) {
@@ -620,6 +730,15 @@ const clearProcess = () => {
   state.lineReader = null;
   state.workerProcess = null;
   state.workerKey = "";
+  if (state.capabilitiesRequest?.timeoutHandle) {
+    clearTimeout(state.capabilitiesRequest.timeoutHandle);
+  }
+  if (state.capabilitiesRequest) {
+    state.capabilitiesRequest.reject(
+      new WorkerJobError("WORKER_PROTOCOL", "Worker unavailable for capabilities.")
+    );
+  }
+  state.capabilitiesRequest = null;
 };
 
 const restartIfQueued = async () => {
@@ -691,5 +810,53 @@ const parsePrewarmInfo = (value: unknown): WorkerPrewarmInfo | null => {
     effectiveDevice,
     cudaAvailable,
     reason: typeof value.reason === "string" ? value.reason : undefined
+  };
+};
+
+const parseCapabilities = (value: unknown): DoclingCapabilities | null => {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const doclingVersion =
+    typeof value.doclingVersion === "string" ? value.doclingVersion : null;
+  const pdfBackends = Array.isArray(value.pdfBackends)
+    ? value.pdfBackends.filter((item) => typeof item === "string")
+    : null;
+  const tableModes = Array.isArray(value.tableModes)
+    ? value.tableModes.filter((item) => typeof item === "string")
+    : null;
+  if (!doclingVersion || !pdfBackends || !tableModes) {
+    return null;
+  }
+  return {
+    doclingVersion,
+    pdfBackends,
+    tableModes,
+    tableStructureOptionsFields: Array.isArray(value.tableStructureOptionsFields)
+      ? value.tableStructureOptionsFields.filter((item) => typeof item === "string")
+      : undefined,
+    cudaAvailable: typeof value.cudaAvailable === "boolean" ? value.cudaAvailable : null,
+    gpuName: typeof value.gpuName === "string" ? value.gpuName : null,
+    torchVersion: typeof value.torchVersion === "string" ? value.torchVersion : null,
+    torchCudaVersion:
+      typeof value.torchCudaVersion === "string" ? value.torchCudaVersion : null
+  };
+};
+
+const parseLastJob = (value: unknown): DoclingJobProof | null => {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const docId = typeof value.docId === "string" ? value.docId : null;
+  if (!docId || !isRecord(value.requested) || !isRecord(value.effective)) {
+    return null;
+  }
+  return {
+    docId,
+    requested: value.requested,
+    effective: value.effective,
+    fallbackReasons: Array.isArray(value.fallbackReasons)
+      ? value.fallbackReasons.filter((item) => typeof item === "string")
+      : undefined
   };
 };

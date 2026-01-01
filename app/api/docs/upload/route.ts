@@ -295,6 +295,7 @@ export async function POST(req: Request) {
         timeoutSec,
         progressState
       });
+      logDoclingProof(meta);
       const timingLog = formatStageTimingsLog({
         docId: id,
         requestId,
@@ -781,6 +782,22 @@ function formatWorkerTimingsLog(options: {
     workerReused,
     spawnedThisRequest
   });
+}
+
+function logDoclingProof(meta: MetaFile) {
+  const requested = meta.docling?.requested ?? null;
+  const effective = meta.docling?.effective ?? null;
+  if (!requested && !effective) {
+    return;
+  }
+  const payload = {
+    event: "ingest_docling_effective",
+    docId: meta.id,
+    requestId: meta.requestId,
+    requested,
+    effective
+  };
+  console.info(`INGEST_META ${JSON.stringify(payload)}`);
 }
 
 function appendLogLineToMeta(meta: MetaFile, line: string, maxBytes: number): MetaFile {

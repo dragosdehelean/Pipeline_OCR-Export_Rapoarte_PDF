@@ -11,6 +11,8 @@ sys.path.append(os.getcwd())
 
 from services.docling_worker.gates import evaluate_gates, load_config
 
+LAST_JOB_PROOF: dict | None = None
+
 
 def now_iso():
     """Returns current UTC time as ISO-8601 with Z suffix."""
@@ -302,6 +304,35 @@ def run_job(
     if "doCellMatching" in profile_cfg:
         docling_meta["doCellMatching"] = profile_cfg.get("doCellMatching")
 
+    docling_requested = {
+        "profile": selected_profile,
+        "pdfBackendRequested": profile_cfg.get("pdfBackend", "dlparse_v2"),
+        "tableModeRequested": profile_cfg.get("tableStructureMode", "fast"),
+        "doCellMatchingRequested": (
+            bool(profile_cfg.get("doCellMatching"))
+            if "doCellMatching" in profile_cfg
+            else None
+        ),
+    }
+    docling_effective = {
+        "doclingVersion": "FAKE",
+        "pdfBackendEffective": docling_meta["pdfBackend"],
+        "tableModeEffective": docling_meta["tableStructureMode"],
+        "doCellMatchingEffective": docling_meta.get("doCellMatching"),
+        "acceleratorEffective": effective_device,
+        "fallbackReasons": [],
+    }
+    docling_caps = {
+        "doclingVersion": "FAKE",
+        "pdfBackends": ["dlparse_v2", "dlparse_v4"],
+        "tableModes": ["fast", "accurate"],
+        "tableStructureOptionsFields": ["mode", "do_cell_matching"],
+        "cudaAvailable": cuda_available,
+        "gpuName": "FAKE_GPU" if cuda_available else None,
+        "torchVersion": "FAKE",
+        "torchCudaVersion": "FAKE",
+    }
+
     meta = {
         "schemaVersion": 1,
         "id": doc_id,
@@ -341,6 +372,11 @@ def run_job(
                 "doclingVersion": "FAKE",
             },
         },
+        "docling": {
+            "requested": docling_requested,
+            "effective": docling_effective,
+            "capabilities": docling_caps,
+        },
         "outputs": outputs,
         "metrics": metrics,
         "qualityGates": {
@@ -356,6 +392,13 @@ def run_job(
     emit_progress("DONE", "Fixture processing complete.", 100, job_id)
     with open(meta_path, "w", encoding="utf-8") as handle:
         json.dump(meta, handle, indent=2)
+    global LAST_JOB_PROOF
+    LAST_JOB_PROOF = {
+        "docId": doc_id,
+        "requested": docling_requested,
+        "effective": docling_effective,
+        "fallbackReasons": [],
+    }
     return 0
 
 
@@ -374,6 +417,25 @@ def run_worker_loop() -> int:
             continue
         if message.get("type") == "shutdown":
             break
+        if message.get("type") == "capabilities":
+            emit_event(
+                {
+                    "event": "capabilities",
+                    "requestId": message.get("requestId"),
+                    "capabilities": {
+                        "doclingVersion": "FAKE",
+                        "pdfBackends": ["dlparse_v2", "dlparse_v4"],
+                        "tableModes": ["fast", "accurate"],
+                        "tableStructureOptionsFields": ["mode", "do_cell_matching"],
+                        "cudaAvailable": os.getenv("FAKE_CUDA_AVAILABLE", "").strip() == "1",
+                        "gpuName": "FAKE_GPU",
+                        "torchVersion": "FAKE",
+                        "torchCudaVersion": "FAKE",
+                    },
+                    "lastJob": LAST_JOB_PROOF,
+                }
+            )
+            continue
         if message.get("type") != "job":
             continue
 
