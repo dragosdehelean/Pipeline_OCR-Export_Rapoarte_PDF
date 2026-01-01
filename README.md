@@ -6,6 +6,7 @@ Local-first Next.js app for PDF/DOCX upload, Docling conversion, strict quality 
 ## Prerequisites
 - Node.js 20.9+
 - Python 3.10+
+- Optional GPU acceleration: NVIDIA CUDA drivers + CUDA-enabled PyTorch in the worker venv.
 
 ## Setup (Windows-first)
 1) Install Node dependencies:
@@ -108,13 +109,20 @@ Python tests:
 python -m pytest -q --cov=services/docling_worker
 ```
 
+## Processing profile
+- The default profile is `digital-balanced`: OCR is disabled by design, table structure runs in FAST mode, and the PDF backend is set to `dlparse_v2` in `config/docling.json`.
+- `digital-fast` is available as a profile with table structure disabled.
+- Scan-like PDFs are rejected in a fast preflight step (no OCR fallback); tune thresholds under `preflight.pdfText` in `config/docling.json`.
+- Docling internal `document_timeout` is configured per profile under `documentTimeoutSec`.
+- Accelerator defaults live in `config/docling.json` under `docling.accelerator.defaultDevice` and can be overridden per upload in the UI Advanced panel.
+
 ## Project structure (current)
 ```
 app/                      Next.js app router (UI + route handlers)
   _components/            UI components
   _lib/                   Shared logic (storage, config, schema, etc.)
 services/docling_worker/  Python Docling worker
-config/                   Quality gates config (single source of truth)
+config/                   Quality gates config + Docling profiles
 tests/
   node/
     unit/
@@ -131,10 +139,14 @@ tests/node/e2e/data-test/  E2E data dir (gitignored)
 
 ## Notes
 - `config/quality-gates.json` is the single source of truth for thresholds and limits.
+- `config/docling.json` defines the Docling profiles + preflight settings.
 - All artifacts are stored under `data/` (gitignored).
 - `.env.local` stays local and is gitignored.
 - Client server-state is managed with TanStack Query.
+- The Python worker prewarms at server startup via Next.js instrumentation and shuts down with the server.
 - Tests live under `tests/` (`tests/node`, `tests/python`, `tests/fixtures`).
 - UX audit outputs live under `tests/node/e2e/ux-audit`.
 - Python coverage data is stored at `tests/python/.coverage` (gitignored) and configured via `tests/python/.coveragerc`.
 - Vitest coverage reports are stored at `tests/node/coverage` (gitignored).
+- Use `scripts/bench_convert.py --input <path>` to benchmark a single conversion locally.
+- Use `scripts/bench_worker_reuse.py --input <path>` to compare first vs. hot reuse spawn timings.

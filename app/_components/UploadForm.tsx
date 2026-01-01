@@ -41,6 +41,8 @@ type UploadError = {
   docId?: string;
 };
 
+type DeviceOverride = "auto" | "cpu" | "cuda";
+
 type ProcessingState = {
   id: string;
   name: string;
@@ -52,10 +54,31 @@ type ProcessingState = {
 
 type UploadPayload = Record<string, unknown>;
 
+type UploadRequest = {
+  file: File;
+  deviceOverride: DeviceOverride;
+};
+
 type UploadResult = {
   ok: boolean;
   status: number;
   payload: UploadPayload;
+};
+
+type BenchmarkStats = {
+  totalMs: number | null;
+  convertMs: number | null;
+  pages: number | null;
+  pagesPerSec: number | null;
+  requestedDevice: string | null;
+  effectiveDevice: string | null;
+  cudaAvailable: boolean | null;
+  reason: string | null;
+};
+
+type BenchmarkResult = {
+  cpu: BenchmarkStats;
+  cuda: BenchmarkStats;
 };
 
 function formatBytes(bytes: number) {
@@ -113,6 +136,30 @@ function getNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+function extractDocId(payload: UploadPayload): string | null {
+  return getString(payload.id) ?? getString(payload.docId) ?? null;
+}
+
+function buildBenchmarkStats(meta: MetaFile): BenchmarkStats {
+  const totalMs = getNumber(meta.processing?.durationMs) ?? null;
+  const convertMs = getNumber(meta.processing?.timings?.doclingConvertMs) ?? null;
+  const pages = getNumber(meta.metrics?.pages) ?? null;
+  const pagesPerSec =
+    pages && convertMs && convertMs > 0 ? pages / (convertMs / 1000) : null;
+  const accelerator = meta.processing?.accelerator;
+  return {
+    totalMs,
+    convertMs,
+    pages,
+    pagesPerSec,
+    requestedDevice: accelerator?.requestedDevice ?? null,
+    effectiveDevice: accelerator?.effectiveDevice ?? null,
+    cudaAvailable:
+      typeof accelerator?.cudaAvailable === "boolean" ? accelerator.cudaAvailable : null,
+    reason: accelerator?.reason ?? null
+  };
+}
+
 async function fetchHealth(signal?: AbortSignal): Promise<HealthPayload> {
   const response = await fetch("/api/health", { cache: "no-store", signal });
   if (!response.ok) {
@@ -155,6 +202,11 @@ export default function UploadForm() {
   const [isDragActive, setIsDragActive] = useState(false);
   const [activeDoc, setActiveDoc] = useState<ProcessingState | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [deviceOverride, setDeviceOverride] = useState<DeviceOverride>("auto");
+  const [benchmarkResult, setBenchmarkResult] = useState<BenchmarkResult | null>(
+    null
+  );
+  const [isBenchmarking, setIsBenchmarking] = useState(false);
   const lastStatusRef = useRef<ProcessingState["status"] | null>(null);
 
   const healthQuery = useQuery({
@@ -188,16 +240,18 @@ export default function UploadForm() {
 
   const clearSelectedFile = () => {
     setSelectedFile(null);
+    setBenchmarkResult(null);
     if (inputRef.current) {
       inputRef.current.value = "";
     }
   };
 
-  const uploadFile = (file: File) =>
+  const uploadFile = (request: UploadRequest) =>
     new Promise<UploadResult>((resolve, reject) => {
       // WHY: XMLHttpRequest exposes upload progress events; fetch does not.
       const formData = new FormData();
-      formData.append("file", file);
+      formData.append("file", request.file);
+      formData.append("deviceOverride", request.deviceOverride);
 
       const xhr = new XMLHttpRequest();
       xhr.open("POST", "/api/docs/upload");
@@ -234,7 +288,7 @@ export default function UploadForm() {
       xhr.send(formData);
     });
 
-  const uploadMutation = useMutation<UploadResult, Error, File>({
+  const uploadMutation = useMutation<UploadResult, Error, UploadRequest>({
     mutationFn: uploadFile,
     onMutate: () => {
       setError(null);
@@ -242,7 +296,7 @@ export default function UploadForm() {
       setActiveDoc(null);
       lastStatusRef.current = null;
     },
-    onSuccess: ({ ok, payload, status }, file) => {
+    onSuccess: ({ ok, payload, status }, request) => {
       if (!ok) {
         const errorPayload = isRecord(payload.error) ? payload.error : null;
         const errorCode = getString(errorPayload?.code) ?? getString(payload.code);
@@ -285,7 +339,7 @@ export default function UploadForm() {
       }
       setActiveDoc({
         id: responseId,
-        name: getString(payload.originalFileName) ?? file.name,
+        name: getString(payload.originalFileName) ?? request.file.name,
         status: statusValue,
         stage: getString(payload.stage) ?? null,
         message: null,
@@ -328,7 +382,7 @@ export default function UploadForm() {
     }
 
     try {
-      await uploadMutation.mutateAsync(file);
+      await uploadMutation.mutateAsync({ file, deviceOverride });
     } catch (err) {
       setError({ message: "Upload failed. Check the console for details." });
     }
@@ -403,6 +457,7 @@ export default function UploadForm() {
     setIsDragActive(false);
     setSelectedFile(file);
     setError(null);
+    setBenchmarkResult(null);
   };
 
   const onDragOver = (event: DragEvent<HTMLDivElement>) => {
@@ -420,13 +475,26 @@ export default function UploadForm() {
     const file = event.target.files?.[0] ?? null;
     setSelectedFile(file);
     setError(null);
+    setBenchmarkResult(null);
   };
 
   const isReady = !health.loading && health.ok;
   const maxPages = health.config?.limits?.maxPages ?? null;
   const timeoutSec = health.config?.limits?.processTimeoutSec ?? null;
   const canUpload =
-    isReady && !!selectedFile && !isUploading && !isFileTooLarge && !fileTypeError;
+    isReady &&
+    !!selectedFile &&
+    !isUploading &&
+    !isBenchmarking &&
+    !isFileTooLarge &&
+    !fileTypeError;
+  const canBenchmark =
+    isReady &&
+    !!selectedFile &&
+    !isUploading &&
+    !isBenchmarking &&
+    !isFileTooLarge &&
+    !fileTypeError;
 
   const processingLabel = (() => {
     if (!processingState) {
@@ -445,6 +513,73 @@ export default function UploadForm() {
     ? processingState.stage.replace(/_/g, " ")
     : null;
 
+  const acceleratorMeta = docQuery.data?.processing?.accelerator ?? null;
+
+  const waitForDocCompletion = async (docId: string, timeoutMs: number) => {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      const meta = await fetchDocMeta(docId);
+      const status = meta.processing?.status;
+      if (status === "FAILED" || status === "SUCCESS") {
+        return meta;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
+    throw new Error("Benchmark timed out.");
+  };
+
+  const runBenchmark = async () => {
+    if (!selectedFile || !canBenchmark) {
+      setError({ message: "Select a valid file before benchmarking." });
+      return;
+    }
+
+    setBenchmarkResult(null);
+    setError(null);
+    setIsBenchmarking(true);
+    const benchmarkTimeoutMs =
+      (timeoutSec && Number.isFinite(timeoutSec) ? timeoutSec : 240) * 1000 + 15000;
+
+    try {
+      const cpuUpload = await uploadMutation.mutateAsync({
+        file: selectedFile,
+        deviceOverride: "cpu"
+      });
+      if (!cpuUpload.ok) {
+        throw new Error("CPU benchmark upload failed.");
+      }
+      const cpuDocId = extractDocId(cpuUpload.payload);
+      if (!cpuDocId) {
+        throw new Error("CPU benchmark response missing document id.");
+      }
+      const cpuMeta = await waitForDocCompletion(cpuDocId, benchmarkTimeoutMs);
+
+      const cudaUpload = await uploadMutation.mutateAsync({
+        file: selectedFile,
+        deviceOverride: "cuda"
+      });
+      if (!cudaUpload.ok) {
+        throw new Error("CUDA benchmark upload failed.");
+      }
+      const cudaDocId = extractDocId(cudaUpload.payload);
+      if (!cudaDocId) {
+        throw new Error("CUDA benchmark response missing document id.");
+      }
+      const cudaMeta = await waitForDocCompletion(cudaDocId, benchmarkTimeoutMs);
+
+      setBenchmarkResult({
+        cpu: buildBenchmarkStats(cpuMeta),
+        cuda: buildBenchmarkStats(cudaMeta)
+      });
+    } catch (err) {
+      setError({
+        message: err instanceof Error ? err.message : "Benchmark failed."
+      });
+    } finally {
+      setIsBenchmarking(false);
+    }
+  };
+
   return (
     <form
       className={`upload-zone ${isDragActive ? "drag-active" : ""}`}
@@ -458,6 +593,7 @@ export default function UploadForm() {
             <li>Copy `.env.local.example` to `.env.local`</li>
             <li>Set `PYTHON_BIN`, `DOCLING_WORKER`, `DATA_DIR`</li>
             <li>Set `GATES_CONFIG_PATH` to `config/quality-gates.json`</li>
+            <li>Set `DOCLING_CONFIG_PATH` to `config/docling.json` (optional)</li>
             <li>Restart `npm run dev` after editing `.env.local`</li>
           </ul>
           {health.missingEnv.length > 0 ? (
@@ -569,6 +705,73 @@ export default function UploadForm() {
           </button>
         </div>
       ) : null}
+      <details className="advanced-panel">
+        <summary>Advanced</summary>
+        <div className="upload-requirements">
+          <div>
+            <span className="label">Device:</span>{" "}
+            <select
+              id="device-override"
+              value={deviceOverride}
+              onChange={(event) =>
+                setDeviceOverride(event.target.value as DeviceOverride)
+              }
+              disabled={isUploading || isBenchmarking}
+            >
+              <option value="auto">Auto</option>
+              <option value="cpu">CPU</option>
+              <option value="cuda">CUDA</option>
+            </select>
+          </div>
+          {acceleratorMeta ? (
+            <div className="note">
+              Effective device: {acceleratorMeta.effectiveDevice} (requested:{" "}
+              {acceleratorMeta.requestedDevice})
+            </div>
+          ) : null}
+          {acceleratorMeta ? (
+            <div className="note">
+              CUDA available: {acceleratorMeta.cudaAvailable ? "yes" : "no"}
+            </div>
+          ) : null}
+          {acceleratorMeta?.reason ? (
+            <div className="note">Fallback reason: {acceleratorMeta.reason}</div>
+          ) : null}
+          <div>
+            <button
+              className="button ghost"
+              type="button"
+              onClick={runBenchmark}
+              disabled={!canBenchmark}
+            >
+              {isBenchmarking ? "Benchmarking..." : "Run benchmark (CPU vs CUDA)"}
+            </button>
+          </div>
+          {benchmarkResult ? (
+            <div className="note">
+              <strong>Benchmark summary</strong>
+              <div>
+                CPU: total {benchmarkResult.cpu.totalMs ?? 0} ms, convert{" "}
+                {benchmarkResult.cpu.convertMs ?? 0} ms,{" "}
+                {benchmarkResult.cpu.pagesPerSec
+                  ? `${benchmarkResult.cpu.pagesPerSec.toFixed(2)} pages/sec`
+                  : "n/a"}
+              </div>
+              <div>
+                CUDA: total {benchmarkResult.cuda.totalMs ?? 0} ms, convert{" "}
+                {benchmarkResult.cuda.convertMs ?? 0} ms,{" "}
+                {benchmarkResult.cuda.pagesPerSec
+                  ? `${benchmarkResult.cuda.pagesPerSec.toFixed(2)} pages/sec`
+                  : "n/a"}
+                {benchmarkResult.cuda.effectiveDevice
+                  ? ` (effective: ${benchmarkResult.cuda.effectiveDevice})`
+                  : ""}
+                {benchmarkResult.cuda.reason ? `, fallback: ${benchmarkResult.cuda.reason}` : ""}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </details>
       {fileTypeError ? (
         <div className="alert warning" role="alert">
           {fileTypeError} Allowed: {acceptLabel}.

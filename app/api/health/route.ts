@@ -4,6 +4,7 @@
 import { NextResponse } from "next/server";
 import { loadQualityGatesConfig, type QualityGatesConfig } from "../../_lib/config";
 import { getMissingEnv, getResolvedRuntimeEnv } from "../../_lib/env";
+import { getWorkerStatus, type WorkerStatusSnapshot } from "../../_lib/workerClient";
 
 export const runtime = "nodejs";
 
@@ -11,6 +12,7 @@ type HealthResponse = {
   ok: boolean;
   missingEnv: string[];
   resolved: ReturnType<typeof getResolvedRuntimeEnv>;
+  worker: WorkerStatusSnapshot;
   config: {
     accept: QualityGatesConfig["accept"];
     limits: Pick<
@@ -29,6 +31,7 @@ type HealthConfig = NonNullable<HealthResponse["config"]>;
 export async function GET() {
   const missingEnv = getMissingEnv();
   const resolved = getResolvedRuntimeEnv();
+  const worker = getWorkerStatus();
   let config: HealthConfig | null = null;
   let configError: string | null = null;
 
@@ -54,6 +57,7 @@ export async function GET() {
     ok,
     missingEnv,
     resolved,
+    worker,
     config,
     configError
   });

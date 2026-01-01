@@ -68,3 +68,47 @@ def test_evaluate_gates_fails():
     assert passed is False
     assert failed[0]["code"] == gate["code"]
     assert evaluated[0]["passed"] is False
+
+
+def test_evaluate_gates_rejects_invalid_op():
+    gate = {
+        "code": "BAD_OP",
+        "enabled": True,
+        "severity": "FAIL",
+        "metric": "pages",
+        "op": "??",
+        "threshold": 1,
+        "message": "invalid",
+    }
+    try:
+        evaluate_gates({"pages": 1}, {"gates": [gate]})
+    except ValueError as exc:
+        assert "Unsupported gate op" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for invalid gate op")
+
+
+def test_evaluate_gates_supports_equal_ops():
+    gate_eq = {
+        "code": "PAGES_EQ",
+        "enabled": True,
+        "severity": "FAIL",
+        "metric": "pages",
+        "op": "==",
+        "threshold": 2,
+        "message": "must equal",
+    }
+    gate_neq = {
+        "code": "PAGES_NEQ",
+        "enabled": True,
+        "severity": "FAIL",
+        "metric": "pages",
+        "op": "!=",
+        "threshold": 2,
+        "message": "must not equal",
+    }
+    passed, failed, evaluated = evaluate_gates({"pages": 2}, {"gates": [gate_eq, gate_neq]})
+    assert passed is False
+    assert any(item["code"] == "PAGES_EQ" and item["passed"] is True for item in evaluated)
+    assert any(item["code"] == "PAGES_NEQ" and item["passed"] is False for item in evaluated)
+    assert failed[0]["code"] == "PAGES_NEQ"

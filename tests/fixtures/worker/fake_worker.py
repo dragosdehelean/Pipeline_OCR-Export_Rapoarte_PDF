@@ -4,6 +4,7 @@ import json
 import os
 import re
 import sys
+from pathlib import Path
 from datetime import datetime, timezone
 
 sys.path.append(os.getcwd())
@@ -16,7 +17,74 @@ def now_iso():
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def emit_progress(stage: str, message: str, progress: int) -> None:
+def load_docling_config(docling_path: str | None, gates_config: dict) -> dict:
+    """Loads docling config with a legacy fallback for tests."""
+    resolved_path = docling_path or os.getenv("DOCLING_CONFIG_PATH")
+    if not resolved_path:
+        resolved_path = os.path.join(os.getcwd(), "config", "docling.json")
+    path = Path(resolved_path)
+    if path.exists():
+        with path.open("r", encoding="utf-8") as handle:
+            return json.load(handle)
+    if "docling" in gates_config or "preflight" in gates_config:
+        docling_cfg = gates_config.get("docling", {})
+        profile = str(docling_cfg.get("profile", "digital-fast"))
+        return {
+            "version": 0,
+            "defaultProfile": profile,
+            "profiles": {
+                profile: {
+                    "pdfBackend": docling_cfg.get("pdfBackend", "dlparse_v2"),
+                    "doOcr": docling_cfg.get("doOcr", False),
+                    "doTableStructure": docling_cfg.get("doTableStructure", False),
+                    "tableStructureMode": docling_cfg.get("tableStructureMode", "fast"),
+                    "documentTimeoutSec": docling_cfg.get("documentTimeoutSec", 0),
+                }
+            },
+            "docling": {
+                "accelerator": {
+                    "defaultDevice": docling_cfg.get("accelerator", "auto")
+                }
+            },
+            "preflight": gates_config.get("preflight", {}),
+        }
+    return {
+        "version": 1,
+        "defaultProfile": "digital-balanced",
+        "profiles": {
+            "digital-balanced": {
+                "pdfBackend": "dlparse_v2",
+                "doOcr": False,
+                "doTableStructure": True,
+                "tableStructureMode": "fast",
+                "documentTimeoutSec": 240,
+            }
+        },
+        "docling": {"accelerator": {"defaultDevice": "auto"}},
+        "preflight": {},
+    }
+
+
+def resolve_default_device(docling_config: dict) -> str:
+    """Resolves the configured default accelerator device."""
+    docling_section = docling_config.get("docling", {})
+    if isinstance(docling_section, dict):
+        accelerator = docling_section.get("accelerator")
+        if isinstance(accelerator, dict):
+            value = accelerator.get("defaultDevice", "auto")
+        else:
+            value = accelerator
+    else:
+        value = "auto"
+    return str(value or "auto").strip().lower()
+
+
+def emit_event(payload: dict) -> None:
+    """Prints JSON events for the Node app."""
+    print(json.dumps(payload), flush=True)
+
+
+def emit_progress(stage: str, message: str, progress: int, job_id: str | None = None) -> None:
     """Prints progress events that the Node app can parse."""
     payload = {
         "event": "progress",
@@ -24,7 +92,9 @@ def emit_progress(stage: str, message: str, progress: int) -> None:
         "message": message,
         "progress": progress,
     }
-    print(json.dumps(payload), flush=True)
+    if job_id:
+        payload["jobId"] = job_id
+    emit_event(payload)
 
 
 def derive_bounds(config: dict) -> dict:
@@ -99,25 +169,44 @@ def value_to_fail(op: str, threshold: float) -> float:
     raise ValueError(f"Unsupported op: {op}")
 
 
-def main() -> int:
-    """Runs the fixture worker to generate meta.json and outputs."""
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--input", required=True)
-    parser.add_argument("--doc-id", required=True)
-    parser.add_argument("--data-dir", required=True)
-    parser.add_argument("--gates", required=True)
-    args = parser.parse_args()
-
-    config = load_config(args.gates)
-    export_dir = os.path.join(args.data_dir, "exports", args.doc_id)
+def run_job(
+    input_path: str,
+    doc_id: str,
+    data_dir: str,
+    gates_path: str,
+    job_id: str,
+    docling_config_path: str | None,
+    device_override: str | None,
+) -> int:
+    """Runs the fixture job to generate meta.json and outputs."""
+    config = load_config(gates_path)
+    docling_config = load_docling_config(docling_config_path, config)
+    default_profile = str(docling_config.get("defaultProfile", "digital-balanced"))
+    profiles = docling_config.get("profiles", {})
+    profile_cfg = profiles.get(default_profile, {})
+    requested_device = device_override or resolve_default_device(docling_config)
+    cuda_available = os.getenv("FAKE_CUDA_AVAILABLE", "").strip() == "1"
+    if requested_device == "cuda" and not cuda_available:
+        effective_device = "cpu"
+        fallback_reason = "CUDA_NOT_AVAILABLE"
+    elif requested_device == "cuda":
+        effective_device = "cuda"
+        fallback_reason = None
+    elif requested_device == "cpu":
+        effective_device = "cpu"
+        fallback_reason = None
+    else:
+        effective_device = "cuda" if cuda_available else "cpu"
+        fallback_reason = None
+    export_dir = os.path.join(data_dir, "exports", doc_id)
     os.makedirs(export_dir, exist_ok=True)
     meta_path = os.path.join(export_dir, "meta.json")
 
-    emit_progress("INIT", "Preparing fixture worker.", 5)
-    size_bytes = os.path.getsize(args.input)
-    file_name = os.path.basename(args.input).lower()
+    emit_progress("INIT", "Preparing fixture worker.", 5, job_id)
+    size_bytes = os.path.getsize(input_path)
+    file_name = os.path.basename(input_path).lower()
     try:
-        with open(args.input, "rb") as handle:
+        with open(input_path, "rb") as handle:
             content_text = handle.read().decode("utf-8", errors="ignore").lower()
     except OSError:
         content_text = ""
@@ -171,7 +260,7 @@ def main() -> int:
 
     passed, failed, evaluated = evaluate_gates(metrics, config)
     status = "SUCCESS" if passed else "FAILED"
-    emit_progress("GATES", "Evaluated quality gates.", 80)
+    emit_progress("GATES", "Evaluated quality gates.", 80, job_id)
 
     outputs = {
         "markdownPath": None,
@@ -180,7 +269,7 @@ def main() -> int:
     }
 
     if passed:
-        emit_progress("WRITE_OUTPUTS", "Writing fixture outputs.", 92)
+        emit_progress("WRITE_OUTPUTS", "Writing fixture outputs.", 92, job_id)
         md_path = os.path.join(export_dir, "output.md")
         json_path = os.path.join(export_dir, "output.json")
         with open(md_path, "w", encoding="utf-8") as handle:
@@ -198,22 +287,44 @@ def main() -> int:
 
     meta = {
         "schemaVersion": 1,
-        "id": args.doc_id,
+        "id": doc_id,
         "createdAt": now_iso(),
         "source": {
-            "originalFileName": os.path.basename(args.input),
+            "originalFileName": os.path.basename(input_path),
             "mimeType": "application/pdf",
-            "sizeBytes": os.path.getsize(args.input),
+            "sizeBytes": size_bytes,
             "sha256": "fake",
-            "storedPath": args.input,
+            "storedPath": input_path,
         },
         "processing": {
             "status": status,
+            "stage": "DONE" if status == "SUCCESS" else "FAILED",
             "startedAt": now_iso(),
             "finishedAt": now_iso(),
             "durationMs": 10,
             "timeoutSec": config["limits"]["processTimeoutSec"],
             "exitCode": 0,
+            "selectedProfile": default_profile,
+            "docling": {
+                "pdfBackend": profile_cfg.get("pdfBackend", "dlparse_v2"),
+                "doOcr": profile_cfg.get("doOcr", False),
+                "doTableStructure": profile_cfg.get("doTableStructure", False),
+                "tableStructureMode": profile_cfg.get("tableStructureMode", "fast"),
+                "documentTimeoutSec": profile_cfg.get("documentTimeoutSec", 0),
+                "accelerator": effective_device,
+            },
+            "accelerator": {
+                "requestedDevice": requested_device,
+                "effectiveDevice": effective_device,
+                "cudaAvailable": cuda_available,
+                **({"reason": fallback_reason} if fallback_reason else {}),
+            },
+            "timings": {
+                "pythonStartupMs": 1,
+                "preflightMs": 1,
+                "doclingConvertMs": 1,
+                "exportMs": 1,
+            },
             "worker": {
                 "pythonBin": sys.executable,
                 "pythonVersion": sys.version.split()[0],
@@ -232,10 +343,80 @@ def main() -> int:
         "logs": {"stdoutTail": "fake worker", "stderrTail": ""},
     }
 
-    emit_progress("DONE", "Fixture processing complete.", 100)
+    emit_progress("DONE", "Fixture processing complete.", 100, job_id)
     with open(meta_path, "w", encoding="utf-8") as handle:
         json.dump(meta, handle, indent=2)
     return 0
+
+
+def run_worker_loop() -> int:
+    """Runs the fixture worker in keep-warm mode."""
+    emit_event({"event": "ready", "pythonStartupMs": 1})
+    for line in sys.stdin:
+        payload = line.strip()
+        if not payload:
+            continue
+        try:
+            message = json.loads(payload)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(message, dict):
+            continue
+        if message.get("type") == "shutdown":
+            break
+        if message.get("type") != "job":
+            continue
+
+        job_id = str(message.get("jobId") or message.get("docId") or "")
+        input_path = message.get("input")
+        doc_id = message.get("docId")
+        data_dir = message.get("dataDir")
+        gates_path = message.get("gates")
+        docling_config_path = message.get("doclingConfig")
+        device_override = message.get("deviceOverride")
+        if not job_id or not input_path or not doc_id or not data_dir or not gates_path:
+            continue
+        run_job(
+            input_path,
+            doc_id,
+            data_dir,
+            gates_path,
+            job_id,
+            docling_config_path,
+            device_override,
+        )
+        meta_path = os.path.join(data_dir, "exports", doc_id, "meta.json")
+        emit_event({"event": "result", "jobId": job_id, "exitCode": 0, "metaPath": meta_path})
+    return 0
+
+
+def main() -> int:
+    """Runs the fixture worker to generate meta.json and outputs."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--worker", action="store_true", help="Run in keep-warm mode.")
+    parser.add_argument("--input")
+    parser.add_argument("--doc-id")
+    parser.add_argument("--data-dir")
+    parser.add_argument("--gates")
+    parser.add_argument("--docling-config")
+    args = parser.parse_args()
+
+    if args.worker:
+        return run_worker_loop()
+
+    missing = [name for name in ("input", "doc_id", "data_dir", "gates") if not getattr(args, name)]
+    if missing:
+        raise SystemExit(f"Missing required args: {', '.join(missing)}")
+
+    return run_job(
+        args.input,
+        args.doc_id,
+        args.data_dir,
+        args.gates,
+        args.doc_id,
+        args.docling_config,
+        None,
+    )
 
 
 if __name__ == "__main__":

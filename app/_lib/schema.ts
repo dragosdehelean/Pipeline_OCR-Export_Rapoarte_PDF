@@ -56,6 +56,55 @@ export const metaSourceSchema = z
   })
   .strict();
 
+export const processingFailureSchema = z
+  .object({
+    code: z.string(),
+    message: z.string(),
+    details: z.string().optional()
+  })
+  .strict();
+
+export const processingDoclingSchema = z
+  .object({
+    pdfBackend: z.string(),
+    doOcr: z.boolean(),
+    doTableStructure: z.boolean(),
+    tableStructureMode: z.string(),
+    documentTimeoutSec: z.number(),
+    accelerator: z.string()
+  })
+  .strict();
+
+export const processingAcceleratorSchema = z
+  .object({
+    requestedDevice: z.string(),
+    effectiveDevice: z.string(),
+    cudaAvailable: z.boolean(),
+    reason: z.string().optional(),
+    torchVersion: z.string().optional(),
+    torchCudaVersion: z.string().optional()
+  })
+  .strict();
+
+export const processingPreflightSchema = z
+  .object({
+    passed: z.boolean(),
+    samplePages: z.number(),
+    textChars: z.number(),
+    textCharsPerPageAvg: z.number(),
+    error: z.string().optional()
+  })
+  .strict();
+
+export const processingTimingsSchema = z
+  .object({
+    pythonStartupMs: z.number().optional(),
+    preflightMs: z.number().optional(),
+    doclingConvertMs: z.number().optional(),
+    exportMs: z.number().optional()
+  })
+  .strict();
+
 export const metaProcessingSchema = z
   .object({
     status: docStatusSchema,
@@ -68,6 +117,13 @@ export const metaProcessingSchema = z
     durationMs: z.number().optional(),
     timeoutSec: z.number().optional(),
     exitCode: z.number().optional(),
+    selectedProfile: z.string().optional(),
+    profile: z.string().optional(),
+    failure: processingFailureSchema.optional(),
+    docling: processingDoclingSchema.optional(),
+    accelerator: processingAcceleratorSchema.optional(),
+    preflight: processingPreflightSchema.optional(),
+    timings: processingTimingsSchema.optional(),
     worker: z
       .object({
         pythonBin: z.string(),
