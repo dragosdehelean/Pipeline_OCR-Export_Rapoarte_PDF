@@ -42,6 +42,7 @@ class DoclingSettings:
     table_structure_mode: str
     document_timeout_sec: int
     accelerator: AcceleratorSelection
+    do_cell_matching: Optional[bool] = None
 
 
 @dataclass(frozen=True)
@@ -319,6 +320,10 @@ def resolve_docling_settings(
     profile, profile_cfg = resolve_profile_config(docling_config, profile_override)
     requested_device = resolve_requested_device(docling_config, device_override)
     accelerator = select_accelerator(requested_device)
+    do_cell_matching_raw = profile_cfg.get("doCellMatching")
+    do_cell_matching = (
+        bool(do_cell_matching_raw) if do_cell_matching_raw is not None else None
+    )
     return DoclingSettings(
         profile=profile,
         pdf_backend=str(profile_cfg.get("pdfBackend", "dlparse_v2")),
@@ -329,6 +334,7 @@ def resolve_docling_settings(
         ),
         document_timeout_sec=int(profile_cfg.get("documentTimeoutSec", 0)),
         accelerator=accelerator,
+        do_cell_matching=do_cell_matching,
     )
 
 
@@ -411,7 +417,8 @@ def build_converter_cache_key(settings: DoclingSettings) -> str:
     return (
         f"{settings.profile}|{settings.pdf_backend}|{settings.do_ocr}|"
         f"{settings.do_table_structure}|{settings.table_structure_mode}|"
-        f"{settings.document_timeout_sec}|{settings.accelerator.effective_device}"
+        f"{settings.document_timeout_sec}|{settings.accelerator.effective_device}|"
+        f"{settings.do_cell_matching}"
     )
 
 
@@ -475,9 +482,12 @@ def get_docling_converter(settings: DoclingSettings) -> Any:
 
     accelerator_device = settings.accelerator.effective_device
     table_mode = resolve_table_structure_mode(settings.table_structure_mode)
-    table_options = TableStructureOptions(
-        mode=TableFormerMode.FAST if table_mode == "fast" else TableFormerMode.ACCURATE
-    )
+    table_options_kwargs: Dict[str, Any] = {
+        "mode": TableFormerMode.FAST if table_mode == "fast" else TableFormerMode.ACCURATE
+    }
+    if settings.do_cell_matching is not None:
+        table_options_kwargs["do_cell_matching"] = settings.do_cell_matching
+    table_options = TableStructureOptions(**table_options_kwargs)
 
     document_timeout = (
         float(settings.document_timeout_sec)
@@ -630,6 +640,16 @@ def build_base_meta(
     """Builds the initial meta.json payload for a document."""
     size_bytes = os.path.getsize(input_path)
     accelerator = settings.accelerator
+    docling_meta = {
+        "pdfBackend": settings.pdf_backend,
+        "doOcr": settings.do_ocr,
+        "doTableStructure": settings.do_table_structure,
+        "tableStructureMode": settings.table_structure_mode,
+        "documentTimeoutSec": settings.document_timeout_sec,
+        "accelerator": accelerator.effective_device,
+    }
+    if settings.do_cell_matching is not None:
+        docling_meta["doCellMatching"] = settings.do_cell_matching
     timings = {
         "pythonStartupMs": python_startup_ms,
         "preflightMs": 0,
@@ -666,14 +686,7 @@ def build_base_meta(
             "timeoutSec": config.get("limits", {}).get("processTimeoutSec", 0),
             "exitCode": 0,
             "selectedProfile": settings.profile,
-            "docling": {
-                "pdfBackend": settings.pdf_backend,
-                "doOcr": settings.do_ocr,
-                "doTableStructure": settings.do_table_structure,
-                "tableStructureMode": settings.table_structure_mode,
-                "documentTimeoutSec": settings.document_timeout_sec,
-                "accelerator": accelerator.effective_device,
-            },
+            "docling": docling_meta,
             "accelerator": accelerator_meta,
             "timings": timings,
             "worker": {
@@ -732,6 +745,7 @@ def run_conversion(
     )
     settings = resolve_docling_settings(
         docling_config,
+        profile_override=getattr(args, "profile", None),
         device_override=getattr(args, "device_override", None),
     )
     export_dir = os.path.join(args.data_dir, "exports", args.doc_id)
@@ -904,6 +918,7 @@ def run_worker_loop() -> int:
         gates_path = message.get("gates")
         docling_config_path = message.get("doclingConfig")
         device_override = message.get("deviceOverride")
+        profile = message.get("profile")
         if (
             not job_id
             or not input_path
@@ -920,6 +935,7 @@ def run_worker_loop() -> int:
             gates=gates_path,
             docling_config=docling_config_path,
             device_override=device_override,
+            profile=profile,
         )
         exit_code = run_conversion(args, job_id=job_id, python_startup_ms=python_startup_ms)
         meta_path = os.path.join(data_dir, "exports", doc_id, "meta.json")
@@ -938,6 +954,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--gates")
     parser.add_argument("--docling-config")
     parser.add_argument("--device-override")
+    parser.add_argument("--profile")
     return parser
 
 

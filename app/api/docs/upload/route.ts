@@ -76,6 +76,7 @@ export async function POST(req: Request) {
 
   const file = formData.get("file");
   const deviceOverride = parseDeviceOverride(formData.get("deviceOverride"));
+  const profileOverride = parseProfile(formData.get("profile"));
 
   if (!isFileLike(file)) {
     return jsonError({
@@ -268,6 +269,7 @@ export async function POST(req: Request) {
     gatesPath: getGatesConfigPath(),
     doclingConfigPath: getDoclingConfigPath(),
     deviceOverride,
+    profile: profileOverride,
     requestId,
     timeoutMs: timeoutSec * 1000,
     stdoutTailBytes: config.limits.stdoutTailKb * 1024,
@@ -655,6 +657,14 @@ function parseDeviceOverride(value: FormDataEntryValue | null) {
     return normalized;
   }
   return null;
+}
+
+function parseProfile(value: FormDataEntryValue | null) {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 function resolveStartedAt(meta: MetaFile, fallback: Date) {

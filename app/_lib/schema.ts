@@ -69,6 +69,7 @@ export const processingDoclingSchema = z
     pdfBackend: z.string(),
     doOcr: z.boolean(),
     doTableStructure: z.boolean(),
+    doCellMatching: z.boolean().optional(),
     tableStructureMode: z.string(),
     documentTimeoutSec: z.number(),
     accelerator: z.string()

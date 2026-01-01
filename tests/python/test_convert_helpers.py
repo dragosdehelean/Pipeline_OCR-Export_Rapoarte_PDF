@@ -149,6 +149,27 @@ def test_resolve_docling_settings_from_config():
     assert settings.table_structure_mode == "fast"
     assert settings.document_timeout_sec == 123
     assert settings.accelerator.requested_device == "cpu"
+    assert settings.do_cell_matching is None
+
+
+def test_resolve_docling_settings_cell_matching_override():
+    config = {
+        "defaultProfile": "digital-accurate-nocellmatch",
+        "profiles": {
+            "digital-accurate-nocellmatch": {
+                "pdfBackend": "dlparse_v4",
+                "doOcr": False,
+                "doTableStructure": True,
+                "doCellMatching": False,
+                "tableStructureMode": "accurate",
+                "documentTimeoutSec": 120,
+            }
+        },
+        "docling": {"accelerator": {"defaultDevice": "cpu"}},
+    }
+    settings = convert.resolve_docling_settings(config)
+    assert settings.profile == "digital-accurate-nocellmatch"
+    assert settings.do_cell_matching is False
 
 
 def test_build_converter_cache_key_uses_effective_device():

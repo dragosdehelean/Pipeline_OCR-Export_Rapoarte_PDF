@@ -26,11 +26,18 @@ type HealthConfig = Pick<QualityGatesConfig, "accept"> & {
   >;
 };
 
+type HealthDocling = {
+  defaultProfile: string;
+  profiles: string[];
+};
+
 type HealthPayload = {
   ok?: boolean;
   missingEnv?: string[];
   config?: HealthConfig | null;
   configError?: string | null;
+  docling?: HealthDocling | null;
+  doclingConfigError?: string | null;
 };
 
 type UploadError = {
@@ -57,6 +64,7 @@ type UploadPayload = Record<string, unknown>;
 type UploadRequest = {
   file: File;
   deviceOverride: DeviceOverride;
+  profile: string | null;
 };
 
 type UploadResult = {
@@ -207,6 +215,7 @@ export default function UploadForm() {
     null
   );
   const [isBenchmarking, setIsBenchmarking] = useState(false);
+  const [profileOverride, setProfileOverride] = useState<string | null>(null);
   const lastStatusRef = useRef<ProcessingState["status"] | null>(null);
 
   const healthQuery = useQuery({
@@ -219,7 +228,8 @@ export default function UploadForm() {
     ok: healthPayload?.ok === true && !healthQuery.isError,
     missingEnv: Array.isArray(healthPayload?.missingEnv) ? healthPayload?.missingEnv : [],
     config: healthPayload?.config ?? null,
-    configError: healthPayload?.configError ?? null
+    configError: healthPayload?.configError ?? healthPayload?.doclingConfigError ?? null,
+    docling: healthPayload?.docling ?? null
   };
 
   const acceptExtensions = health.config?.accept?.extensions ?? [];
@@ -237,6 +247,21 @@ export default function UploadForm() {
       ? `File exceeds max size (${maxFileSizeMb} MB).`
       : null;
   const fileTypeError = getFileTypeError(selectedFile, acceptExtensions, acceptMimeTypes);
+  const doclingProfiles = health.docling?.profiles ?? [];
+  const defaultProfile = health.docling?.defaultProfile ?? "";
+  const resolvedProfile =
+    (profileOverride && doclingProfiles.includes(profileOverride)
+      ? profileOverride
+      : doclingProfiles.includes(defaultProfile)
+        ? defaultProfile
+        : doclingProfiles[0]) || null;
+
+  useEffect(() => {
+    if (!defaultProfile) {
+      return;
+    }
+    setProfileOverride((current) => current ?? defaultProfile);
+  }, [defaultProfile]);
 
   const clearSelectedFile = () => {
     setSelectedFile(null);
@@ -252,6 +277,9 @@ export default function UploadForm() {
       const formData = new FormData();
       formData.append("file", request.file);
       formData.append("deviceOverride", request.deviceOverride);
+      if (request.profile) {
+        formData.append("profile", request.profile);
+      }
 
       const xhr = new XMLHttpRequest();
       xhr.open("POST", "/api/docs/upload");
@@ -382,7 +410,11 @@ export default function UploadForm() {
     }
 
     try {
-      await uploadMutation.mutateAsync({ file, deviceOverride });
+      await uploadMutation.mutateAsync({
+        file,
+        deviceOverride,
+        profile: resolvedProfile
+      });
     } catch (err) {
       setError({ message: "Upload failed. Check the console for details." });
     }
@@ -543,7 +575,8 @@ export default function UploadForm() {
     try {
       const cpuUpload = await uploadMutation.mutateAsync({
         file: selectedFile,
-        deviceOverride: "cpu"
+        deviceOverride: "cpu",
+        profile: resolvedProfile
       });
       if (!cpuUpload.ok) {
         throw new Error("CPU benchmark upload failed.");
@@ -556,7 +589,8 @@ export default function UploadForm() {
 
       const cudaUpload = await uploadMutation.mutateAsync({
         file: selectedFile,
-        deviceOverride: "cuda"
+        deviceOverride: "cuda",
+        profile: resolvedProfile
       });
       if (!cudaUpload.ok) {
         throw new Error("CUDA benchmark upload failed.");
@@ -723,6 +757,23 @@ export default function UploadForm() {
               <option value="cuda">CUDA</option>
             </select>
           </div>
+          {doclingProfiles.length ? (
+            <div>
+              <span className="label">Profile:</span>{" "}
+              <select
+                id="profile-override"
+                value={resolvedProfile ?? ""}
+                onChange={(event) => setProfileOverride(event.target.value)}
+                disabled={isUploading || isBenchmarking}
+              >
+                {doclingProfiles.map((profile) => (
+                  <option key={profile} value={profile}>
+                    {profile}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
           {acceleratorMeta ? (
             <div className="note">
               Effective device: {acceleratorMeta.effectiveDevice} (requested:{" "}

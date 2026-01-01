@@ -2,6 +2,7 @@
  * @fileoverview Manages a keep-warm Docling worker process using JSONL IPC.
  */
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import type * as readline from "node:readline";
 
 export type WorkerStatusSnapshot = {
   status: "stopped" | "starting" | "ready" | "error";
@@ -73,6 +74,7 @@ type WorkerJobOptions = {
   gatesPath: string;
   doclingConfigPath: string;
   deviceOverride?: string | null;
+  profile?: string | null;
   requestId: string;
   timeoutMs: number;
   stdoutTailBytes: number;
@@ -431,7 +433,7 @@ const attachListeners = (
   state.lineReader?.close();
   state.lineReader = readlineModule.createInterface({ input: process.stdout });
 
-  state.lineReader.on("line", (line) => {
+  state.lineReader.on("line", (line: string) => {
     handleWorkerLine(line);
   });
 
@@ -563,6 +565,7 @@ const sendJob = (job: WorkerJob) => {
     gates: job.gatesPath,
     doclingConfig: job.doclingConfigPath,
     deviceOverride: job.deviceOverride ?? undefined,
+    profile: job.profile ?? undefined,
     requestId: job.requestId
   };
 

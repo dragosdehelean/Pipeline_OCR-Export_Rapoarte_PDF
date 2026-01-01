@@ -112,6 +112,9 @@ python -m pytest -q --cov=services/docling_worker
 ## Processing profile
 - The default profile is `digital-balanced`: OCR is disabled by design, table structure runs in FAST mode, and the PDF backend is set to `dlparse_v2` in `config/docling.json`.
 - `digital-fast` is available as a profile with table structure disabled.
+- `digital-accurate` uses `dlparse_v4` with TableFormer ACCURATE.
+- `digital-accurate-nocellmatch` uses `dlparse_v4` with TableFormer ACCURATE and `do_cell_matching=false`.
+- To change profiles manually, edit `config/docling.json`.
 - Scan-like PDFs are rejected in a fast preflight step (no OCR fallback); tune thresholds under `preflight.pdfText` in `config/docling.json`.
 - Docling internal `document_timeout` is configured per profile under `documentTimeoutSec`.
 - Accelerator defaults live in `config/docling.json` under `docling.accelerator.defaultDevice` and can be overridden per upload in the UI Advanced panel.

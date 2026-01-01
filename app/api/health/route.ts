@@ -2,7 +2,11 @@
  * @fileoverview Health endpoint for env readiness and gate config preview.
  */
 import { NextResponse } from "next/server";
-import { loadQualityGatesConfig, type QualityGatesConfig } from "../../_lib/config";
+import {
+  loadDoclingConfig,
+  loadQualityGatesConfig,
+  type QualityGatesConfig
+} from "../../_lib/config";
 import { getMissingEnv, getResolvedRuntimeEnv } from "../../_lib/env";
 import { getWorkerStatus, type WorkerStatusSnapshot } from "../../_lib/workerClient";
 
@@ -13,6 +17,10 @@ type HealthResponse = {
   missingEnv: string[];
   resolved: ReturnType<typeof getResolvedRuntimeEnv>;
   worker: WorkerStatusSnapshot;
+  docling: {
+    defaultProfile: string;
+    profiles: string[];
+  } | null;
   config: {
     accept: QualityGatesConfig["accept"];
     limits: Pick<
@@ -21,6 +29,7 @@ type HealthResponse = {
     >;
   } | null;
   configError: string | null;
+  doclingConfigError: string | null;
 };
 
 type HealthConfig = NonNullable<HealthResponse["config"]>;
@@ -34,6 +43,8 @@ export async function GET() {
   const worker = getWorkerStatus();
   let config: HealthConfig | null = null;
   let configError: string | null = null;
+  let docling: HealthResponse["docling"] = null;
+  let doclingConfigError: string | null = null;
 
   if (missingEnv.length === 0) {
     try {
@@ -49,16 +60,28 @@ export async function GET() {
     } catch (error) {
       configError = (error as Error).message || "Failed to load config.";
     }
+    try {
+      const doclingConfig = await loadDoclingConfig();
+      docling = {
+        defaultProfile: doclingConfig.defaultProfile,
+        profiles: Object.keys(doclingConfig.profiles)
+      };
+    } catch (error) {
+      doclingConfigError =
+        (error as Error).message || "Failed to load docling config.";
+    }
   }
 
-  const ok = missingEnv.length === 0 && !configError;
+  const ok = missingEnv.length === 0 && !configError && !doclingConfigError;
 
   return NextResponse.json<HealthResponse>({
     ok,
     missingEnv,
     resolved,
     worker,
+    docling,
     config,
-    configError
+    configError,
+    doclingConfigError
   });
 }

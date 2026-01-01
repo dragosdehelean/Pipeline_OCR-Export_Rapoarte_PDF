@@ -59,6 +59,7 @@ const doclingProfileSchema = z
     pdfBackend: z.string(),
     doOcr: z.boolean(),
     doTableStructure: z.boolean(),
+    doCellMatching: z.boolean().optional(),
     tableStructureMode: z.string(),
     documentTimeoutSec: z.number()
   })
@@ -68,7 +69,7 @@ export const doclingConfigSchema = z
   .object({
     version: z.number(),
     defaultProfile: z.string(),
-    profiles: z.record(doclingProfileSchema),
+    profiles: z.record(z.string(), doclingProfileSchema),
     preflight: z
       .object({
         pdfText: z
