@@ -328,12 +328,6 @@ def test_normalize_engine_defaults():
     assert convert.normalize_engine("unknown") == "docling"
 
 
-def test_resolve_layout_mode_uses_config_default():
-    config = {"pymupdf4llm": {"layoutModeDefault": "standard"}}
-    assert convert.resolve_layout_mode(None, config) == "standard"
-    assert convert.resolve_layout_mode("layout", config) == "layout"
-
-
 def test_get_pymupdf_version_parses_doc(monkeypatch: pytest.MonkeyPatch):
     dummy = types.SimpleNamespace(__doc__="PyMuPDF 2.0.1: test")
     monkeypatch.setitem(sys.modules, "pymupdf", dummy)
@@ -367,7 +361,6 @@ def test_check_module_available_missing():
 def test_get_pymupdf_capabilities_shapes():
     caps = convert.get_pymupdf_capabilities()
     assert "pymupdf4llm" in caps
-    assert "layout" in caps
 
 
 def test_normalize_pymupdf4llm_result_dict():

@@ -30,13 +30,13 @@ def test_worker_dependencies_importable():
         pytest.fail(f"Missing runtime dependency: pymupdf4llm ({exc})")
 
     config = load_pymupdf_config()
-    layout_enabled = bool(config.get("pymupdf4llm", {}).get("layoutEnabled", True))
-    if not layout_enabled:
-        return
+    require_layout = bool(config.get("pymupdf4llm", {}).get("requireLayout", True))
+    if not require_layout:
+        pytest.fail("PyMuPDF4LLM requireLayout must be true.")
 
     try:
         import pymupdf.layout  # noqa: F401
     except Exception as exc:
         pytest.fail(
-            f"Missing runtime dependency: pymupdf-layout (layoutEnabled=true): {exc}"
+            f"Missing runtime dependency: pymupdf-layout (requireLayout=true): {exc}"
         )

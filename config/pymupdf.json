@@ -3,8 +3,7 @@
   "defaultEngine": "docling",
   "engines": ["docling", "pymupdf4llm"],
   "pymupdf4llm": {
-    "layoutModeDefault": "layout",
-    "layoutEnabled": true,
+    "requireLayout": true,
     "toMarkdown": {
       "write_images": false,
       "embed_images": false,

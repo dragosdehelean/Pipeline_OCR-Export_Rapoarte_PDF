@@ -542,8 +542,7 @@ def _write_pymupdf_config(path: Path) -> None:
         "defaultEngine": "docling",
         "engines": ["docling", "pymupdf4llm"],
         "pymupdf4llm": {
-            "layoutModeDefault": "layout",
-            "layoutEnabled": True,
+            "requireLayout": True,
             "toMarkdown": {
                 "write_images": False,
                 "embed_images": False,
@@ -613,11 +612,52 @@ def test_run_conversion_pymupdf4llm_layout(tmp_path: Path, monkeypatch: pytest.M
         docling_config=str(DOCLING_CONFIG_PATH),
         pymupdf_config=str(pymupdf_config_path),
         engine="pymupdf4llm",
-        layout_mode="layout",
     )
     exit_code = convert.run_conversion(args)
     assert exit_code == 0
     meta_path = tmp_path / "exports" / "doc-pymupdf-llm" / "meta.json"
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
     assert meta["processing"]["status"] == "SUCCESS"
-    assert meta["engine"]["effective"]["layoutMode"] == "layout"
+    assert meta["engine"]["effective"]["layoutActive"] is True
+
+
+def test_run_conversion_pymupdf4llm_layout_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    dummy_pymupdf = types.SimpleNamespace(__doc__="PyMuPDF 1.2.3")
+    monkeypatch.setitem(sys.modules, "pymupdf", dummy_pymupdf)
+
+    import builtins
+
+    original_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "pymupdf.layout":
+            raise ModuleNotFoundError("No module named 'pymupdf.layout'")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    pymupdf_config_path = tmp_path / "pymupdf.json"
+    _write_pymupdf_config(pymupdf_config_path)
+    input_path = tmp_path / "input.pdf"
+    input_path.write_text("%PDF-1.4", encoding="utf-8")
+
+    args = types.SimpleNamespace(
+        input=str(input_path),
+        doc_id="doc-pymupdf-layout-missing",
+        data_dir=str(tmp_path),
+        gates=str(CONFIG_PATH),
+        docling_config=str(DOCLING_CONFIG_PATH),
+        pymupdf_config=str(pymupdf_config_path),
+        engine="pymupdf4llm",
+    )
+    exit_code = convert.run_conversion(args)
+    assert exit_code == 1
+    meta_path = tmp_path / "exports" / "doc-pymupdf-layout-missing" / "meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert meta["processing"]["status"] == "FAILED"
+    assert meta["processing"]["failure"]["code"] == "PYMUPDF_LAYOUT_UNAVAILABLE"
+    assert (
+        meta["processing"]["message"] == "PyMuPDF4LLM layout-only: layout unavailable"
+    )

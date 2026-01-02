@@ -40,7 +40,6 @@ export type PyMuPDFAvailability = {
 
 export type PyMuPDFCapabilities = {
   pymupdf4llm: PyMuPDFAvailability;
-  layout: PyMuPDFAvailability;
 };
 
 export type DoclingJobProof = {
@@ -111,7 +110,6 @@ type WorkerJobOptions = {
   doclingConfigPath: string;
   pymupdfConfigPath: string;
   engine?: "docling" | "pymupdf4llm";
-  layoutMode?: "layout" | "standard" | null;
   deviceOverride?: string | null;
   profile?: string | null;
   requestId: string;
@@ -691,7 +689,6 @@ const sendJob = (job: WorkerJob) => {
     doclingConfig: job.doclingConfigPath,
     pymupdfConfig: job.pymupdfConfigPath,
     engine: job.engine ?? "docling",
-    layoutMode: job.layoutMode ?? undefined,
     deviceOverride: job.deviceOverride ?? undefined,
     profile: job.profile ?? undefined,
     requestId: job.requestId
@@ -883,11 +880,10 @@ const parsePyMuPDFCapabilities = (value: unknown): PyMuPDFCapabilities | null =>
     return null;
   }
   const pymupdf4llm = parsePyMuPDFAvailability(value.pymupdf4llm);
-  const layout = parsePyMuPDFAvailability(value.layout);
-  if (!pymupdf4llm || !layout) {
+  if (!pymupdf4llm) {
     return null;
   }
-  return { pymupdf4llm, layout };
+  return { pymupdf4llm };
 };
 
 const parseLastJob = (value: unknown): DoclingJobProof | null => {

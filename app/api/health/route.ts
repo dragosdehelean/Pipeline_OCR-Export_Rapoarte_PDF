@@ -30,10 +30,8 @@ type HealthResponse = {
   pymupdf: {
     engines: string[];
     defaultEngine: string;
-    layoutModeDefault?: "layout" | "standard";
     availability?: {
       pymupdf4llm: { available: boolean; reason?: string | null };
-      layout: { available: boolean; reason?: string | null };
     };
     configError?: string;
   } | null;
@@ -95,8 +93,7 @@ export async function GET() {
       const pymupdfConfig = await loadPyMuPDFConfig();
       pymupdf = {
         engines: pymupdfConfig.engines,
-        defaultEngine: pymupdfConfig.defaultEngine,
-        layoutModeDefault: pymupdfConfig.pymupdf4llm.layoutModeDefault
+        defaultEngine: pymupdfConfig.defaultEngine
       };
     } catch (error) {
       pymupdf = {
@@ -146,17 +143,12 @@ function buildPyMuPDFAvailability(
   if (!availability) {
     return {
       pymupdf4llm: { available: false, reason: "WORKER_CAPABILITIES_UNAVAILABLE" },
-      layout: { available: false, reason: "WORKER_CAPABILITIES_UNAVAILABLE" }
     };
   }
   return {
     pymupdf4llm: {
       available: availability.pymupdf4llm.available,
       reason: availability.pymupdf4llm.reason ?? null
-    },
-    layout: {
-      available: availability.layout.available,
-      reason: availability.layout.reason ?? null
     }
   };
 }

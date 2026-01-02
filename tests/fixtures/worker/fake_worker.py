@@ -180,7 +180,6 @@ def run_job(
     docling_config_path: str | None,
     pymupdf_config_path: str | None,
     engine: str | None,
-    layout_mode: str | None,
     device_override: str | None,
     profile_override: str | None,
 ) -> int:
@@ -216,6 +215,9 @@ def run_job(
     emit_progress("INIT", "Preparing fixture worker.", 5, job_id)
     size_bytes = os.path.getsize(input_path)
     file_name = os.path.basename(input_path).lower()
+    engine_name = engine or "docling"
+    layout_available = os.getenv("FAKE_PYMUPDF_LAYOUT_AVAILABLE", "1").strip() != "0"
+    layout_missing = engine_name == "pymupdf4llm" and not layout_available
     try:
         with open(input_path, "rb") as handle:
             content_text = handle.read().decode("utf-8", errors="ignore").lower()
@@ -271,6 +273,11 @@ def run_job(
 
     passed, failed, evaluated = evaluate_gates(metrics, config)
     status = "SUCCESS" if passed else "FAILED"
+    if layout_missing:
+        passed = False
+        failed = []
+        evaluated = []
+        status = "FAILED"
     emit_progress("GATES", "Evaluated quality gates.", 80, job_id)
 
     outputs = {
@@ -307,7 +314,6 @@ def run_job(
     if "doCellMatching" in profile_cfg:
         docling_meta["doCellMatching"] = profile_cfg.get("doCellMatching")
 
-    engine_name = engine or "docling"
     docling_requested = None
     docling_effective = None
     docling_caps = None
@@ -345,14 +351,15 @@ def run_job(
 
     engine_requested = {
         "name": engine_name,
-        **({"layoutMode": layout_mode} if layout_mode else {}),
     }
     engine_effective = {
         "name": engine_name,
-        **({"layoutMode": layout_mode} if layout_mode else {}),
         **({"pymupdfVersion": "FAKE"} if engine_name != "docling" else {}),
         **({"pymupdf4llmVersion": "FAKE"} if engine_name == "pymupdf4llm" else {}),
     }
+    if engine_name == "pymupdf4llm":
+        engine_effective["layoutActive"] = not layout_missing
+        engine_effective["layoutOnly"] = True
 
     meta = {
         "schemaVersion": 1,
@@ -373,6 +380,18 @@ def run_job(
             "durationMs": 10,
             "timeoutSec": config["limits"]["processTimeoutSec"],
             "exitCode": 0,
+            **(
+                {
+                    "message": "PyMuPDF4LLM layout-only: layout unavailable",
+                    "failure": {
+                        "code": "PYMUPDF_LAYOUT_UNAVAILABLE",
+                        "message": "PyMuPDF4LLM layout-only: layout unavailable",
+                        "details": "FAKE_PYMUPDF_LAYOUT_AVAILABLE=0",
+                    },
+                }
+                if layout_missing
+                else {}
+            ),
             "selectedProfile": selected_profile,
             **({"docling": docling_processing} if docling_processing else {}),
             "accelerator": {
@@ -483,7 +502,6 @@ def run_worker_loop() -> int:
         docling_config_path = message.get("doclingConfig")
         pymupdf_config_path = message.get("pymupdfConfig")
         engine = message.get("engine")
-        layout_mode = message.get("layoutMode")
         device_override = message.get("deviceOverride")
         if not job_id or not input_path or not doc_id or not data_dir or not gates_path:
             continue
@@ -496,7 +514,6 @@ def run_worker_loop() -> int:
             docling_config_path,
             pymupdf_config_path,
             engine,
-            layout_mode,
             device_override,
             message.get("profile"),
         )
@@ -530,7 +547,6 @@ def main() -> int:
         args.gates,
         args.doc_id,
         args.docling_config,
-        None,
         None,
         None,
         None,

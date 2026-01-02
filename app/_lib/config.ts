@@ -110,8 +110,7 @@ const engineSchema = z.enum(["docling", "pymupdf4llm"]);
 
 const pymupdf4llmSchema = z
   .object({
-    layoutModeDefault: z.enum(["layout", "standard"]),
-    layoutEnabled: z.boolean(),
+    requireLayout: z.boolean(),
     toMarkdown: z
       .object({
         write_images: z.boolean(),
@@ -145,6 +144,13 @@ export const pymupdfConfigSchema = z
         code: z.ZodIssueCode.custom,
         message: `defaultEngine "${value.defaultEngine}" is missing from engines.`,
         path: ["defaultEngine"]
+      });
+    }
+    if (!value.pymupdf4llm.requireLayout) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "PyMuPDF4LLM must run in layout-only mode.",
+        path: ["pymupdf4llm", "requireLayout"]
       });
     }
   });

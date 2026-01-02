@@ -124,4 +124,62 @@ describe("docs api integration", () => {
     expect(meta.qualityGates.failedGates.length).toBeGreaterThan(0);
   });
 
+  it("uploads a document with pymupdf4llm engine", async () => {
+    const formData = new FormData();
+    const file = new File(["BT (Hello) Tj ET"], "good.pdf", {
+      type: "application/pdf"
+    });
+    formData.append("file", file);
+    formData.append("engine", "pymupdf4llm");
+
+    const request = new Request("http://localhost/api/docs/upload", {
+      method: "POST",
+      body: formData
+    });
+
+    const response = await upload(request);
+    const payload = await response.json();
+    expect(response.status).toBe(202);
+    const meta = await waitForMeta(payload.id);
+    expect(meta.processing.status).toBe("SUCCESS");
+    expect(meta.engine?.requested?.name).toBe("pymupdf4llm");
+    expect(meta.engine?.effective?.name).toBe("pymupdf4llm");
+    expect(meta.engine?.effective?.layoutActive).toBe(true);
+  });
+
+  it("fails pymupdf4llm when layout deps are unavailable", async () => {
+    const original = process.env.FAKE_PYMUPDF_LAYOUT_AVAILABLE;
+    process.env.FAKE_PYMUPDF_LAYOUT_AVAILABLE = "0";
+    await shutdownWorker();
+    try {
+      const formData = new FormData();
+      const file = new File(["BT (Hello) Tj ET"], "good.pdf", {
+        type: "application/pdf"
+      });
+      formData.append("file", file);
+      formData.append("engine", "pymupdf4llm");
+
+      const request = new Request("http://localhost/api/docs/upload", {
+        method: "POST",
+        body: formData
+      });
+
+      const response = await upload(request);
+      const payload = await response.json();
+      expect(response.status).toBe(202);
+      const meta = await waitForMeta(payload.id);
+      expect(meta.processing.status).toBe("FAILED");
+      expect(meta.processing.failure?.code).toBe("PYMUPDF_LAYOUT_UNAVAILABLE");
+      expect(meta.processing.failure?.message).toBe(
+        "PyMuPDF4LLM layout-only: layout unavailable"
+      );
+    } finally {
+      if (original === undefined) {
+        delete process.env.FAKE_PYMUPDF_LAYOUT_AVAILABLE;
+      } else {
+        process.env.FAKE_PYMUPDF_LAYOUT_AVAILABLE = original;
+      }
+    }
+  });
+
 });

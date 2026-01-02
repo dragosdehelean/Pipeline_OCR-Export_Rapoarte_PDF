@@ -11,6 +11,7 @@ import base64
 import zlib
 import importlib
 import inspect
+import traceback
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple
@@ -28,6 +29,10 @@ LAST_JOB_PROOF: Optional[Dict[str, Any]] = None
 
 ENGINE_DOCLING = "docling"
 ENGINE_PYMUPDF4LLM = "pymupdf4llm"
+
+
+class LayoutUnavailableError(RuntimeError):
+    """Raised when PyMuPDF4LLM layout-only requirements are not met."""
 
 
 @dataclass(frozen=True)
@@ -348,19 +353,36 @@ def check_module_available(module_name: str) -> Tuple[bool, Optional[str]]:
 def get_pymupdf_capabilities() -> Dict[str, Any]:
     """Returns PyMuPDF engine availability with reasons."""
     pymupdf_ok, pymupdf_reason = check_module_available("pymupdf")
-    pymupdf4llm_ok, pymupdf4llm_reason = check_module_available("pymupdf4llm")
-    layout_ok, layout_reason = check_module_available("pymupdf.layout")
+    layout_ok = False
+    layout_reason = None
+    if pymupdf_ok:
+        try:
+            importlib.import_module("pymupdf.layout")
+            layout_ok = True
+        except Exception as exc:
+            detail = str(exc).strip()
+            layout_reason = (
+                f"IMPORT_PYMUPDF_LAYOUT_FAILED: {detail}"
+                if detail
+                else "IMPORT_PYMUPDF_LAYOUT_FAILED"
+            )
+    pymupdf4llm_ok = False
+    pymupdf4llm_reason = None
+    if pymupdf_ok and layout_ok:
+        pymupdf4llm_ok, pymupdf4llm_reason = check_module_available("pymupdf4llm")
     return {
         "pymupdf4llm": {
-            "available": pymupdf_ok and pymupdf4llm_ok,
-            "reason": pymupdf4llm_reason if not pymupdf4llm_ok else pymupdf_reason,
+            "available": pymupdf_ok and pymupdf4llm_ok and layout_ok,
+            "reason": (
+                layout_reason
+                if not layout_ok
+                else pymupdf4llm_reason
+                if not pymupdf4llm_ok
+                else pymupdf_reason
+            ),
             "version": get_pymupdf4llm_version()
-            if pymupdf_ok and pymupdf4llm_ok
+            if pymupdf_ok and pymupdf4llm_ok and layout_ok
             else "UNKNOWN",
-        },
-        "layout": {
-            "available": pymupdf_ok and layout_ok,
-            "reason": layout_reason if not layout_ok else pymupdf_reason,
         },
     }
 
@@ -1064,17 +1086,6 @@ def normalize_engine(value: Optional[str]) -> str:
     return ENGINE_DOCLING
 
 
-def resolve_layout_mode(
-    value: Optional[str], pymupdf_config: Dict[str, Any]
-) -> str:
-    """Resolves the layout mode for PyMuPDF4LLM."""
-    normalized = str(value or "").strip().lower()
-    if normalized in {"layout", "standard"}:
-        return normalized
-    return str(
-        pymupdf_config.get("pymupdf4llm", {}).get("layoutModeDefault", "layout")
-    )
-
 
 def normalize_pymupdf4llm_result(
     result: Any,
@@ -1105,44 +1116,29 @@ def run_pymupdf4llm_conversion(
     args: argparse.Namespace,
     config: Dict[str, Any],
     pymupdf_config: Dict[str, Any],
-    layout_mode: str,
     job_id: Optional[str],
     python_startup_ms: Optional[int],
 ) -> int:
-    """Runs a PyMuPDF4LLM extraction workflow with optional layout mode."""
+    """Runs a PyMuPDF4LLM extraction workflow (layout-only)."""
     export_dir = os.path.join(args.data_dir, "exports", args.doc_id)
     os.makedirs(export_dir, exist_ok=True)
     meta_path = os.path.join(export_dir, "meta.json")
     llm_config = pymupdf_config.get("pymupdf4llm", {})
+    require_layout = bool(llm_config.get("requireLayout", True))
+    if not require_layout:
+        raise ValueError("PyMuPDF4LLM must run in layout-only mode.")
     to_markdown_config = dict(llm_config.get("toMarkdown", {}))
     # Keep stdout JSON-only; UI progress comes from emit_progress events.
     to_markdown_config["show_progress"] = False
-    layout_requested = layout_mode == "layout"
-    layout_enabled = bool(llm_config.get("layoutEnabled", True))
-    layout_effective = False
-    fallback_reasons: list[str] = []
-    if layout_requested:
-        if layout_enabled:
-            try:
-                import pymupdf.layout  # noqa: F401
-
-                layout_effective = True
-            except Exception:
-                fallback_reasons.append("LAYOUT_IMPORT_FAILED")
-        else:
-            fallback_reasons.append("LAYOUT_DISABLED")
-
-    layout_mode_effective = "layout" if layout_effective else "standard"
     engine_requested = {
         "name": ENGINE_PYMUPDF4LLM,
-        "layoutMode": layout_mode,
+        "layoutOnly": True,
         "toMarkdown": to_markdown_config,
     }
     engine_effective = {
         "name": ENGINE_PYMUPDF4LLM,
-        "layoutMode": layout_mode_effective,
-        "layoutEnabledEffective": layout_effective,
-        "fallbackReasons": fallback_reasons,
+        "layoutOnly": True,
+        "layoutActive": False,
         "pymupdfVersion": get_pymupdf_version(),
         "pymupdf4llmVersion": get_pymupdf4llm_version(),
     }
@@ -1160,7 +1156,16 @@ def run_pymupdf4llm_conversion(
         if not args.input.lower().endswith(".pdf"):
             raise ValueError("PyMuPDF engines require PDF input.")
         import pymupdf
+        try:
+            import pymupdf.layout  # noqa: F401
+        except Exception as exc:
+            raise LayoutUnavailableError(
+                "PyMuPDF4LLM layout-only: layout unavailable. Install pymupdf-layout and "
+                "ensure it imports before pymupdf4llm."
+            ) from exc
         import pymupdf4llm
+
+        engine_effective["layoutActive"] = True
 
         doc = pymupdf.open(args.input)
         pages_text: list[str] = []
@@ -1186,20 +1191,14 @@ def run_pymupdf4llm_conversion(
                 pages_text.append(markdown)
                 if chunks is not None:
                     page_chunks.append(chunks)
-                if layout_effective and callable(to_json_fn):
+                if callable(to_json_fn):
                     try:
                         json_pages.append(to_json_fn(doc, pages=[index]))
                     except Exception:
-                        fallback_reasons.append("TO_JSON_FAILED")
                         json_pages = []
                         to_json_fn = None
         finally:
             doc.close()
-
-        layout_mode_effective = "layout" if layout_effective else "standard"
-        engine_effective["layoutMode"] = layout_mode_effective
-        engine_effective["layoutEnabledEffective"] = layout_effective
-        engine_effective["fallbackReasons"] = fallback_reasons
 
         markdown = "\n\n---\n\n".join(markdown_pages)
         emit_progress("METRICS", "Computing metrics.", 75, job_id)
@@ -1235,16 +1234,16 @@ def run_pymupdf4llm_conversion(
             with open(md_path, "w", encoding="utf-8") as handle:
                 handle.write(markdown)
             output_payload: Dict[str, Any]
-            if layout_mode_effective == "layout" and json_pages:
+            if json_pages:
                 output_payload = {
                     "engine": ENGINE_PYMUPDF4LLM,
-                    "layoutMode": layout_mode_effective,
+                    "layoutActive": True,
                     "pages": json_pages,
                 }
             else:
                 output_payload = {
                     "engine": ENGINE_PYMUPDF4LLM,
-                    "layoutMode": layout_mode_effective,
+                    "layoutActive": True,
                     "pages": page_chunks
                     if page_chunks
                     else [
@@ -1274,10 +1273,22 @@ def run_pymupdf4llm_conversion(
         meta["processing"]["status"] = "FAILED"
         meta["processing"]["stage"] = "FAILED"
         meta["processing"]["exitCode"] = 1
-        meta["processing"]["message"] = "Processing failed."
-        meta["processing"]["failure"] = {"code": "WORKER_EXCEPTION", "message": str(exc)}
+        error_message = str(exc)
+        error_trace = traceback.format_exc()
+        if isinstance(exc, LayoutUnavailableError):
+            user_message = "PyMuPDF4LLM layout-only: layout unavailable"
+            failure_code = "PYMUPDF_LAYOUT_UNAVAILABLE"
+        else:
+            user_message = "Processing failed."
+            failure_code = "WORKER_EXCEPTION"
+        meta["processing"]["message"] = user_message
+        meta["processing"]["failure"] = {
+            "code": failure_code,
+            "message": user_message,
+            "details": error_message,
+        }
         meta["logs"]["stderrTail"] = clamp_tail(
-            str(exc), config["limits"]["stderrTailKb"]
+            error_trace, config["limits"]["stderrTailKb"]
         )
         emit_progress("FAILED", "Processing failed.", 100, job_id)
         record_processing_end(meta, start)
@@ -1298,9 +1309,8 @@ def run_pymupdf_conversion(
 ) -> int:
     """Routes conversion for PyMuPDF engines."""
     pymupdf_config = load_pymupdf_config(getattr(args, "pymupdf_config", None))
-    layout_mode = resolve_layout_mode(getattr(args, "layout_mode", None), pymupdf_config)
     return run_pymupdf4llm_conversion(
-        args, config, pymupdf_config, layout_mode, job_id, python_startup_ms
+        args, config, pymupdf_config, job_id, python_startup_ms
     )
 
 
@@ -1518,7 +1528,6 @@ def run_worker_loop() -> int:
         docling_config_path = message.get("doclingConfig")
         pymupdf_config_path = message.get("pymupdfConfig")
         engine = message.get("engine")
-        layout_mode = message.get("layoutMode")
         device_override = message.get("deviceOverride")
         profile = message.get("profile")
         if (
@@ -1538,7 +1547,6 @@ def run_worker_loop() -> int:
             docling_config=docling_config_path,
             pymupdf_config=pymupdf_config_path,
             engine=engine,
-            layout_mode=layout_mode,
             device_override=device_override,
             profile=profile,
         )
@@ -1560,7 +1568,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--docling-config")
     parser.add_argument("--pymupdf-config")
     parser.add_argument("--engine")
-    parser.add_argument("--layout-mode")
     parser.add_argument("--device-override")
     parser.add_argument("--profile")
     return parser

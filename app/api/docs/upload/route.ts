@@ -80,8 +80,6 @@ export async function POST(req: Request) {
   const deviceOverride = parseDeviceOverride(formData.get("deviceOverride"));
   const profileOverride = parseProfile(formData.get("profile"));
   const requestedEngine = parseEngine(formData.get("engine"));
-  const requestedLayoutMode = parseLayoutMode(formData.get("layoutMode"));
-
   if (!isFileLike(file)) {
     return jsonError({
       status: 400,
@@ -127,8 +125,7 @@ export async function POST(req: Request) {
   const stageTimer = createStageTimer("UPLOAD", startedAt.getTime());
 
   let engine = "docling";
-  let layoutMode: string | null = null;
-  if (requestedEngine || requestedLayoutMode) {
+  if (requestedEngine) {
     try {
       const pymupdfConfig = await loadPyMuPDFConfig();
       engine = requestedEngine ?? pymupdfConfig.defaultEngine ?? "docling";
@@ -140,8 +137,6 @@ export async function POST(req: Request) {
           requestId
         });
       }
-      layoutMode =
-        requestedLayoutMode ?? pymupdfConfig.pymupdf4llm.layoutModeDefault;
     } catch (error) {
       return jsonError({
         status: 500,
@@ -310,7 +305,6 @@ export async function POST(req: Request) {
     doclingConfigPath: getDoclingConfigPath(),
     pymupdfConfigPath: getPyMuPDFConfigPath(),
     engine,
-    layoutMode: engine === "pymupdf4llm" ? layoutMode : null,
     deviceOverride,
     profile: profileOverride,
     requestId,
@@ -717,18 +711,7 @@ function parseEngine(value: FormDataEntryValue | null) {
     return null;
   }
   const normalized = value.trim().toLowerCase();
-    if (normalized === "docling" || normalized === "pymupdf4llm") {
-      return normalized;
-    }
-  return null;
-}
-
-function parseLayoutMode(value: FormDataEntryValue | null) {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "layout" || normalized === "standard") {
+  if (normalized === "docling" || normalized === "pymupdf4llm") {
     return normalized;
   }
   return null;

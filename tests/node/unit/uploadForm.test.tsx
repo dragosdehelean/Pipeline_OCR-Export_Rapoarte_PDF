@@ -177,15 +177,10 @@ describe("UploadForm", () => {
           pymupdf: {
             engines: ["docling", "pymupdf4llm"],
             defaultEngine: "docling",
-            layoutModeDefault: "layout",
             availability: {
               pymupdf4llm: {
                 available: false,
                 reason: "IMPORT_PYMUPDF4LLM_FAILED"
-              },
-              layout: {
-                available: false,
-                reason: "IMPORT_PYMUPDF_LAYOUT_FAILED"
               }
             }
           }

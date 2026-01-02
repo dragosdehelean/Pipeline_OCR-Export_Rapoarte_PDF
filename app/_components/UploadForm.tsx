@@ -33,15 +33,11 @@ type HealthDocling = {
 
 type EngineName = "docling" | "pymupdf4llm";
 
-type LayoutMode = "layout" | "standard";
-
 type HealthPyMuPDF = {
   engines: EngineName[];
   defaultEngine: EngineName;
-  layoutModeDefault?: LayoutMode;
   availability?: {
     pymupdf4llm: { available: boolean; reason?: string | null };
-    layout: { available: boolean; reason?: string | null };
   };
   configError?: string;
 };
@@ -82,7 +78,6 @@ type UploadRequest = {
   deviceOverride: DeviceOverride;
   profile: string | null;
   engine: EngineName;
-  layoutMode: LayoutMode | null;
 };
 
 type UploadResult = {
@@ -195,7 +190,6 @@ export default function UploadForm() {
   const [deviceOverride, setDeviceOverride] = useState<DeviceOverride>("auto");
   const [profileOverride, setProfileOverride] = useState<string | null>(null);
   const [engine, setEngine] = useState<EngineName>("docling");
-  const [layoutMode, setLayoutMode] = useState<LayoutMode>("layout");
   const lastStatusRef = useRef<ProcessingState["status"] | null>(null);
 
   const healthQuery = useQuery({
@@ -277,12 +271,6 @@ export default function UploadForm() {
     }
     return enabledEngines[0] ?? "docling";
   })();
-  const layoutAvailable =
-    engineAvailability?.layout.available ??
-    (engineAvailability ? false : true);
-  const defaultLayoutMode =
-    health.pymupdf?.layoutModeDefault ?? "layout";
-
   useEffect(() => {
     if (!defaultProfile) {
       return;
@@ -302,14 +290,6 @@ export default function UploadForm() {
     );
   }, [availableEnginesKey, defaultEngine, isPdf, engineAvailability]);
 
-  useEffect(() => {
-    if (!layoutAvailable) {
-      setLayoutMode("standard");
-      return;
-    }
-    setLayoutMode(defaultLayoutMode);
-  }, [defaultLayoutMode, layoutAvailable]);
-
   const clearSelectedFile = () => {
     setSelectedFile(null);
     if (inputRef.current) {
@@ -324,9 +304,6 @@ export default function UploadForm() {
       formData.append("file", request.file);
       formData.append("deviceOverride", request.deviceOverride);
       formData.append("engine", request.engine);
-      if (request.layoutMode) {
-        formData.append("layoutMode", request.layoutMode);
-      }
       if (request.profile) {
         formData.append("profile", request.profile);
       }
@@ -464,8 +441,7 @@ export default function UploadForm() {
         file,
         deviceOverride,
         profile: resolvedProfile,
-        engine: isPdf ? engine : "docling",
-        layoutMode: engine === "pymupdf4llm" ? layoutMode : null
+        engine: isPdf ? engine : "docling"
       });
     } catch (err) {
       setError({ message: "Upload failed. Check the console for details." });
@@ -745,28 +721,15 @@ export default function UploadForm() {
               {isDocx ? (
                 <span className="note"> Docling is required for DOCX.</span>
               ) : null}
+              {engine === "pymupdf4llm" && isPdf ? (
+                <span className="note"> PyMuPDF4LLM runs in Layout mode only.</span>
+              ) : null}
               {!isEngineAvailable(engine) ? (
                 <span className="note">
                   {" "}
                   Engine unavailable: update worker deps.
                 </span>
               ) : null}
-            </div>
-          ) : null}
-          {engine === "pymupdf4llm" && isPdf ? (
-            <div>
-              <span className="label">Layout mode:</span>{" "}
-              <select
-                id="layout-mode"
-                value={layoutMode}
-                onChange={(event) => setLayoutMode(event.target.value as LayoutMode)}
-                disabled={isUploading}
-              >
-                <option value="layout" disabled={!layoutAvailable}>
-                  Layout
-                </option>
-                <option value="standard">Standard</option>
-              </select>
             </div>
           ) : null}
           <div>

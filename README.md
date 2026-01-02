@@ -121,7 +121,8 @@ uv run pytest -q
 
 ## Engines and profiles
 - Default engine is Docling.
-- PyMuPDF4LLM supports layout/standard modes (layout requires `pymupdf-layout`).
+- PyMuPDF4LLM is layout-only (requires `pymupdf-layout`).
+- If layout deps are missing, PyMuPDF4LLM is unavailable.
 - `pymupdf4llm.show_progress` (console tqdm) stays disabled to keep worker stdout JSONL-only.
 - The UI progress bar still updates because the worker emits per-page `emit_progress(...)` events.
 - Do not enable any library progress output to stdout; it can break JSON parsing.
