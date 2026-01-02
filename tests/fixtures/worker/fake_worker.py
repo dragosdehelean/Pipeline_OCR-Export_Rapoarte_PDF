@@ -464,7 +464,6 @@ def run_worker_loop() -> int:
                         "torchVersion": "FAKE",
                         "torchCudaVersion": "FAKE",
                         "pymupdf": {
-                            "pymupdf": {"available": True, "reason": None, "version": "FAKE"},
                             "pymupdf4llm": {"available": True, "reason": None, "version": "FAKE"},
                             "layout": {"available": True, "reason": None},
                         },

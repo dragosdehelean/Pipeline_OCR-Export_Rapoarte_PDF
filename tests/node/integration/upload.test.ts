@@ -124,25 +124,4 @@ describe("docs api integration", () => {
     expect(meta.qualityGates.failedGates.length).toBeGreaterThan(0);
   });
 
-  it("uploads a document with pymupdf_text engine", async () => {
-    const formData = new FormData();
-    const file = new File(["BT (Hello) Tj ET"], "good.pdf", {
-      type: "application/pdf"
-    });
-    formData.append("file", file);
-    formData.append("engine", "pymupdf_text");
-
-    const request = new Request("http://localhost/api/docs/upload", {
-      method: "POST",
-      body: formData
-    });
-
-    const response = await upload(request);
-    const payload = await response.json();
-    expect(response.status).toBe(202);
-    const meta = await waitForMeta(payload.id);
-    expect(meta.processing.status).toBe("SUCCESS");
-    expect(meta.engine?.requested?.name).toBe("pymupdf_text");
-    expect(meta.engine?.effective?.name).toBe("pymupdf_text");
-  });
 });

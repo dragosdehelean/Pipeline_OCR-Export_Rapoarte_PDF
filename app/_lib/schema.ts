@@ -17,16 +17,7 @@ export const metricsSchema = z
     mdChars: z.number(),
     textItems: z.number(),
     tables: z.number(),
-    textCharsPerPageAvg: z.number(),
-    splitSpacing: z
-      .object({
-        score: z.number(),
-        suspicious: z.boolean(),
-        singleCharTokenRatio: z.number().optional(),
-        singleCharRuns: z.number().optional()
-      })
-      .strict()
-      .optional()
+    textCharsPerPageAvg: z.number()
   })
   .strict();
 

@@ -31,7 +31,7 @@ type HealthDocling = {
   profiles: string[];
 };
 
-type EngineName = "docling" | "pymupdf4llm" | "pymupdf_text";
+type EngineName = "docling" | "pymupdf4llm";
 
 type LayoutMode = "layout" | "standard";
 
@@ -40,7 +40,6 @@ type HealthPyMuPDF = {
   defaultEngine: EngineName;
   layoutModeDefault?: LayoutMode;
   availability?: {
-    pymupdf_text: { available: boolean; reason?: string | null };
     pymupdf4llm: { available: boolean; reason?: string | null };
     layout: { available: boolean; reason?: string | null };
   };
@@ -90,22 +89,6 @@ type UploadResult = {
   ok: boolean;
   status: number;
   payload: UploadPayload;
-};
-
-type BenchmarkStats = {
-  totalMs: number | null;
-  convertMs: number | null;
-  pages: number | null;
-  pagesPerSec: number | null;
-  requestedDevice: string | null;
-  effectiveDevice: string | null;
-  cudaAvailable: boolean | null;
-  reason: string | null;
-};
-
-type BenchmarkResult = {
-  cpu: BenchmarkStats;
-  cuda: BenchmarkStats;
 };
 
 function formatBytes(bytes: number) {
@@ -167,26 +150,6 @@ function extractDocId(payload: UploadPayload): string | null {
   return getString(payload.id) ?? getString(payload.docId) ?? null;
 }
 
-function buildBenchmarkStats(meta: MetaFile): BenchmarkStats {
-  const totalMs = getNumber(meta.processing?.durationMs) ?? null;
-  const convertMs = getNumber(meta.processing?.timings?.doclingConvertMs) ?? null;
-  const pages = getNumber(meta.metrics?.pages) ?? null;
-  const pagesPerSec =
-    pages && convertMs && convertMs > 0 ? pages / (convertMs / 1000) : null;
-  const accelerator = meta.processing?.accelerator;
-  return {
-    totalMs,
-    convertMs,
-    pages,
-    pagesPerSec,
-    requestedDevice: accelerator?.requestedDevice ?? null,
-    effectiveDevice: accelerator?.effectiveDevice ?? null,
-    cudaAvailable:
-      typeof accelerator?.cudaAvailable === "boolean" ? accelerator.cudaAvailable : null,
-    reason: accelerator?.reason ?? null
-  };
-}
-
 async function fetchHealth(signal?: AbortSignal): Promise<HealthPayload> {
   const response = await fetch("/api/health", { cache: "no-store", signal });
   if (!response.ok) {
@@ -230,10 +193,6 @@ export default function UploadForm() {
   const [activeDoc, setActiveDoc] = useState<ProcessingState | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [deviceOverride, setDeviceOverride] = useState<DeviceOverride>("auto");
-  const [benchmarkResult, setBenchmarkResult] = useState<BenchmarkResult | null>(
-    null
-  );
-  const [isBenchmarking, setIsBenchmarking] = useState(false);
   const [profileOverride, setProfileOverride] = useState<string | null>(null);
   const [engine, setEngine] = useState<EngineName>("docling");
   const [layoutMode, setLayoutMode] = useState<LayoutMode>("layout");
@@ -306,9 +265,6 @@ export default function UploadForm() {
     if (!engineAvailability) {
       return false;
     }
-    if (engineName === "pymupdf_text") {
-      return engineAvailability.pymupdf_text.available;
-    }
     return engineAvailability.pymupdf4llm.available;
   };
   const enabledEngines = availableEngines.filter((engineName) =>
@@ -356,7 +312,6 @@ export default function UploadForm() {
 
   const clearSelectedFile = () => {
     setSelectedFile(null);
-    setBenchmarkResult(null);
     if (inputRef.current) {
       inputRef.current.value = "";
     }
@@ -586,7 +541,6 @@ export default function UploadForm() {
     setIsDragActive(false);
     setSelectedFile(file);
     setError(null);
-    setBenchmarkResult(null);
   };
 
   const onDragOver = (event: DragEvent<HTMLDivElement>) => {
@@ -604,7 +558,6 @@ export default function UploadForm() {
     const file = event.target.files?.[0] ?? null;
     setSelectedFile(file);
     setError(null);
-    setBenchmarkResult(null);
   };
 
   const isReady = !health.loading && health.ok;
@@ -617,15 +570,6 @@ export default function UploadForm() {
     isReady &&
     !!selectedFile &&
     !isUploading &&
-    !isBenchmarking &&
-    !isFileTooLarge &&
-    !fileTypeError;
-  const canBenchmark =
-    isReady &&
-    !!selectedFile &&
-    canUseDoclingControls &&
-    !isUploading &&
-    !isBenchmarking &&
     !isFileTooLarge &&
     !fileTypeError;
 
@@ -647,77 +591,6 @@ export default function UploadForm() {
     : null;
 
   const acceleratorMeta = docQuery.data?.processing?.accelerator ?? null;
-
-  const waitForDocCompletion = async (docId: string, timeoutMs: number) => {
-    const startedAt = Date.now();
-    while (Date.now() - startedAt < timeoutMs) {
-      const meta = await fetchDocMeta(docId);
-      const status = meta.processing?.status;
-      if (status === "FAILED" || status === "SUCCESS") {
-        return meta;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-    }
-    throw new Error("Benchmark timed out.");
-  };
-
-  const runBenchmark = async () => {
-    if (!selectedFile || !canBenchmark) {
-      setError({ message: "Select a valid file before benchmarking." });
-      return;
-    }
-
-    setBenchmarkResult(null);
-    setError(null);
-    setIsBenchmarking(true);
-    const benchmarkTimeoutMs =
-      (timeoutSec && Number.isFinite(timeoutSec) ? timeoutSec : 240) * 1000 + 15000;
-
-    try {
-      const cpuUpload = await uploadMutation.mutateAsync({
-        file: selectedFile,
-        deviceOverride: "cpu",
-        profile: resolvedProfile,
-        engine: "docling",
-        layoutMode: null
-      });
-      if (!cpuUpload.ok) {
-        throw new Error("CPU benchmark upload failed.");
-      }
-      const cpuDocId = extractDocId(cpuUpload.payload);
-      if (!cpuDocId) {
-        throw new Error("CPU benchmark response missing document id.");
-      }
-      const cpuMeta = await waitForDocCompletion(cpuDocId, benchmarkTimeoutMs);
-
-      const cudaUpload = await uploadMutation.mutateAsync({
-        file: selectedFile,
-        deviceOverride: "cuda",
-        profile: resolvedProfile,
-        engine: "docling",
-        layoutMode: null
-      });
-      if (!cudaUpload.ok) {
-        throw new Error("CUDA benchmark upload failed.");
-      }
-      const cudaDocId = extractDocId(cudaUpload.payload);
-      if (!cudaDocId) {
-        throw new Error("CUDA benchmark response missing document id.");
-      }
-      const cudaMeta = await waitForDocCompletion(cudaDocId, benchmarkTimeoutMs);
-
-      setBenchmarkResult({
-        cpu: buildBenchmarkStats(cpuMeta),
-        cuda: buildBenchmarkStats(cudaMeta)
-      });
-    } catch (err) {
-      setError({
-        message: err instanceof Error ? err.message : "Benchmark failed."
-      });
-    } finally {
-      setIsBenchmarking(false);
-    }
-  };
 
   return (
     <form
@@ -855,7 +728,7 @@ export default function UploadForm() {
                 id="engine-override"
                 value={engine}
                 onChange={(event) => setEngine(event.target.value as EngineName)}
-                disabled={isUploading || isBenchmarking || !isPdf}
+                disabled={isUploading || !isPdf}
               >
                 {availableEngines.map((engineOption) => (
                   <option
@@ -865,9 +738,7 @@ export default function UploadForm() {
                   >
                     {engineOption === "docling"
                       ? "Docling"
-                      : engineOption === "pymupdf4llm"
-                        ? "PyMuPDF4LLM"
-                        : "PyMuPDF (text flags)"}
+                      : "PyMuPDF4LLM"}
                   </option>
                 ))}
               </select>
@@ -889,7 +760,7 @@ export default function UploadForm() {
                 id="layout-mode"
                 value={layoutMode}
                 onChange={(event) => setLayoutMode(event.target.value as LayoutMode)}
-                disabled={isUploading || isBenchmarking}
+                disabled={isUploading}
               >
                 <option value="layout" disabled={!layoutAvailable}>
                   Layout
@@ -906,7 +777,7 @@ export default function UploadForm() {
               onChange={(event) =>
                 setDeviceOverride(event.target.value as DeviceOverride)
               }
-              disabled={isUploading || isBenchmarking || !canUseDoclingControls}
+              disabled={isUploading || !canUseDoclingControls}
             >
               <option value="auto">Auto</option>
               <option value="cpu">CPU</option>
@@ -923,7 +794,7 @@ export default function UploadForm() {
                 id="profile-override"
                 value={resolvedProfile ?? ""}
                 onChange={(event) => setProfileOverride(event.target.value)}
-                disabled={isUploading || isBenchmarking || !canUseDoclingControls}
+                disabled={isUploading || !canUseDoclingControls}
               >
                 {doclingProfiles.map((profile) => (
                   <option key={profile} value={profile}>
@@ -949,39 +820,6 @@ export default function UploadForm() {
           ) : null}
           {acceleratorMeta?.reason ? (
             <div className="note">Fallback reason: {acceleratorMeta.reason}</div>
-          ) : null}
-          <div>
-            <button
-              className="button ghost"
-              type="button"
-              onClick={runBenchmark}
-              disabled={!canBenchmark}
-            >
-              {isBenchmarking ? "Benchmarking..." : "Run benchmark (CPU vs CUDA)"}
-            </button>
-          </div>
-          {benchmarkResult ? (
-            <div className="note">
-              <strong>Benchmark summary</strong>
-              <div>
-                CPU: total {benchmarkResult.cpu.totalMs ?? 0} ms, convert{" "}
-                {benchmarkResult.cpu.convertMs ?? 0} ms,{" "}
-                {benchmarkResult.cpu.pagesPerSec
-                  ? `${benchmarkResult.cpu.pagesPerSec.toFixed(2)} pages/sec`
-                  : "n/a"}
-              </div>
-              <div>
-                CUDA: total {benchmarkResult.cuda.totalMs ?? 0} ms, convert{" "}
-                {benchmarkResult.cuda.convertMs ?? 0} ms,{" "}
-                {benchmarkResult.cuda.pagesPerSec
-                  ? `${benchmarkResult.cuda.pagesPerSec.toFixed(2)} pages/sec`
-                  : "n/a"}
-                {benchmarkResult.cuda.effectiveDevice
-                  ? ` (effective: ${benchmarkResult.cuda.effectiveDevice})`
-                  : ""}
-                {benchmarkResult.cuda.reason ? `, fallback: ${benchmarkResult.cuda.reason}` : ""}
-              </div>
-            </div>
           ) : null}
         </div>
       </details>

@@ -717,13 +717,9 @@ function parseEngine(value: FormDataEntryValue | null) {
     return null;
   }
   const normalized = value.trim().toLowerCase();
-  if (
-    normalized === "docling" ||
-    normalized === "pymupdf4llm" ||
-    normalized === "pymupdf_text"
-  ) {
-    return normalized;
-  }
+    if (normalized === "docling" || normalized === "pymupdf4llm") {
+      return normalized;
+    }
   return null;
 }
 

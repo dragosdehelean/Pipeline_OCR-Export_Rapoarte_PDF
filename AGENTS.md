@@ -91,7 +91,6 @@ Python worker:
 ### Engines
 - Docling (default)
 - PyMuPDF4LLM (layout/standard)
-- PyMuPDF text flags
 - `pymupdf4llm.show_progress` (console tqdm) stays disabled to keep worker stdout JSONL-only.
 - UI progress still updates because the worker emits per-page `emit_progress(...)` events.
 - Do not enable any library progress output to stdout; it can break JSON parsing.

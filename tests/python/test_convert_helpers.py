@@ -324,7 +324,7 @@ def test_resolve_pdf_backend_class_and_converter(monkeypatch: pytest.MonkeyPatch
 
 def test_normalize_engine_defaults():
     assert convert.normalize_engine(None) == "docling"
-    assert convert.normalize_engine("pymupdf_text") == "pymupdf_text"
+    assert convert.normalize_engine("pymupdf4llm") == "pymupdf4llm"
     assert convert.normalize_engine("unknown") == "docling"
 
 
@@ -334,32 +334,10 @@ def test_resolve_layout_mode_uses_config_default():
     assert convert.resolve_layout_mode("layout", config) == "layout"
 
 
-def test_compute_split_spacing_marks_suspicious():
-    config = {
-        "splitDetection": {
-            "enabled": True,
-            "singleCharTokenRatioThreshold": 0.2,
-            "minTokenCount": 1,
-            "minSingleCharRun": 3,
-        }
-    }
-    result = convert.compute_split_spacing(["C I F R A test"], config)
-    assert result is not None
-    assert result["suspicious"] is True
-
-
 def test_get_pymupdf_version_parses_doc(monkeypatch: pytest.MonkeyPatch):
     dummy = types.SimpleNamespace(__doc__="PyMuPDF 2.0.1: test")
     monkeypatch.setitem(sys.modules, "pymupdf", dummy)
     assert convert.get_pymupdf_version() == "2.0.1"
-
-
-def test_resolve_pymupdf_text_flags(monkeypatch: pytest.MonkeyPatch):
-    dummy = types.SimpleNamespace(TEXT_INHIBIT_SPACES=4)
-    monkeypatch.setitem(sys.modules, "pymupdf", dummy)
-    mask, names = convert.resolve_pymupdf_text_flags(["TEXT_INHIBIT_SPACES"])
-    assert mask == 4
-    assert names == ["TEXT_INHIBIT_SPACES"]
 
 
 def test_normalize_pymupdf4llm_result_tuple():
@@ -380,34 +358,6 @@ def test_get_pymupdf_version_falls_back_to_dunder(monkeypatch: pytest.MonkeyPatc
     assert convert.get_pymupdf_version() == "3.1.4"
 
 
-def test_resolve_pymupdf_text_flags_unknown(monkeypatch: pytest.MonkeyPatch):
-    dummy = types.SimpleNamespace(TEXT_INHIBIT_SPACES=1)
-    monkeypatch.setitem(sys.modules, "pymupdf", dummy)
-    with pytest.raises(ValueError):
-        convert.resolve_pymupdf_text_flags(["MISSING_FLAG"])
-
-
-def test_resolve_pymupdf_text_flags_non_int(monkeypatch: pytest.MonkeyPatch):
-    dummy = types.SimpleNamespace(TEXT_INHIBIT_SPACES="bad")
-    monkeypatch.setitem(sys.modules, "pymupdf", dummy)
-    with pytest.raises(ValueError):
-        convert.resolve_pymupdf_text_flags(["TEXT_INHIBIT_SPACES"])
-
-
-def test_compute_split_spacing_handles_empty_tokens():
-    config = {
-        "splitDetection": {
-            "enabled": True,
-            "singleCharTokenRatioThreshold": 0.2,
-            "minTokenCount": 1,
-            "minSingleCharRun": 3,
-        }
-    }
-    result = convert.compute_split_spacing(["   "], config)
-    assert result is not None
-    assert result["score"] == 0.0
-
-
 def test_check_module_available_missing():
     ok, reason = convert.check_module_available("missing_module_for_test")
     assert ok is False
@@ -416,7 +366,6 @@ def test_check_module_available_missing():
 
 def test_get_pymupdf_capabilities_shapes():
     caps = convert.get_pymupdf_capabilities()
-    assert "pymupdf" in caps
     assert "pymupdf4llm" in caps
     assert "layout" in caps
 

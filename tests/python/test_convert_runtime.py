@@ -540,11 +540,7 @@ def _write_pymupdf_config(path: Path) -> None:
     payload = {
         "version": 1,
         "defaultEngine": "docling",
-        "engines": ["docling", "pymupdf_text", "pymupdf4llm"],
-        "pymupdf_text": {
-            "textFlags": ["TEXT_INHIBIT_SPACES"],
-            "getTextKind": "text",
-        },
+        "engines": ["docling", "pymupdf4llm"],
         "pymupdf4llm": {
             "layoutModeDefault": "layout",
             "layoutEnabled": True,
@@ -563,65 +559,8 @@ def _write_pymupdf_config(path: Path) -> None:
                 "extract_tables": True,
             },
         },
-        "splitDetection": {
-            "enabled": False,
-            "singleCharTokenRatioThreshold": 0.2,
-            "minTokenCount": 1,
-            "minSingleCharRun": 3,
-        },
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
-
-
-def test_run_conversion_pymupdf_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    config = load_repo_config()
-    required = required_metrics(config)
-    min_chars = int(max(required.get("textChars", 0), required.get("mdChars", 0)))
-    min_words = int(max(required.get("textItems", 0), 1))
-    text_body = build_text(min_chars, min_words)
-
-    class DummyPage:
-        def get_text(self, kind: str, flags: int = 0):
-            return text_body
-
-    class DummyDoc:
-        def __init__(self):
-            self.page_count = 1
-
-        def load_page(self, index: int):
-            return DummyPage()
-
-        def close(self):
-            return None
-
-    dummy_pymupdf = types.SimpleNamespace(
-        open=lambda path: DummyDoc(),
-        TEXT_INHIBIT_SPACES=1,
-        __doc__="PyMuPDF 1.2.3",
-    )
-    monkeypatch.setitem(sys.modules, "pymupdf", dummy_pymupdf)
-
-    pymupdf_config_path = tmp_path / "pymupdf.json"
-    _write_pymupdf_config(pymupdf_config_path)
-    input_path = tmp_path / "input.pdf"
-    input_path.write_text("%PDF-1.4", encoding="utf-8")
-
-    args = types.SimpleNamespace(
-        input=str(input_path),
-        doc_id="doc-pymupdf-text",
-        data_dir=str(tmp_path),
-        gates=str(CONFIG_PATH),
-        docling_config=str(DOCLING_CONFIG_PATH),
-        pymupdf_config=str(pymupdf_config_path),
-        engine="pymupdf_text",
-        layout_mode=None,
-    )
-    exit_code = convert.run_conversion(args)
-    assert exit_code == 0
-    meta_path = tmp_path / "exports" / "doc-pymupdf-text" / "meta.json"
-    meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    assert meta["processing"]["status"] == "SUCCESS"
-    assert meta["engine"]["effective"]["pymupdfVersion"] == "1.2.3"
 
 
 def test_run_conversion_pymupdf4llm_layout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

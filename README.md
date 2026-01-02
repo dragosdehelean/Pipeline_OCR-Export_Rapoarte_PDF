@@ -122,7 +122,6 @@ uv run pytest -q
 ## Engines and profiles
 - Default engine is Docling.
 - PyMuPDF4LLM supports layout/standard modes (layout requires `pymupdf-layout`).
-- PyMuPDF text extraction uses configurable TEXT_* flags from `config/pymupdf.json`.
 - `pymupdf4llm.show_progress` (console tqdm) stays disabled to keep worker stdout JSONL-only.
 - The UI progress bar still updates because the worker emits per-page `emit_progress(...)` events.
 - Do not enable any library progress output to stdout; it can break JSON parsing.
@@ -161,7 +160,7 @@ tests/node/e2e/data-test/  E2E data dir (gitignored)
 ## Notes
 - `config/quality-gates.json` is the single source of truth for thresholds and limits.
 - `config/docling.json` defines the Docling profiles + preflight settings.
-- `config/pymupdf.json` defines PyMuPDF engine defaults and flags.
+- `config/pymupdf.json` defines PyMuPDF4LLM defaults.
 - All artifacts are stored under `data/` (gitignored).
 - `.env.local` stays local and is gitignored.
 - Client server-state is managed with TanStack Query.
@@ -170,5 +169,3 @@ tests/node/e2e/data-test/  E2E data dir (gitignored)
 - UX audit outputs live under `tests/node/e2e/ux-audit`.
 - Python coverage data is stored at `tests/python/.coverage` (gitignored) and configured via `tests/python/.coveragerc`.
 - Vitest coverage reports are stored at `tests/node/coverage` (gitignored).
-- Use `scripts/bench_convert.py --input <path>` to benchmark a single conversion locally.
-- Use `scripts/bench_worker_reuse.py --input <path>` to compare first vs. hot reuse spawn timings.

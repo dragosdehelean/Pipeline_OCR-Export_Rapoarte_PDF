@@ -28,7 +28,6 @@ LAST_JOB_PROOF: Optional[Dict[str, Any]] = None
 
 ENGINE_DOCLING = "docling"
 ENGINE_PYMUPDF4LLM = "pymupdf4llm"
-ENGINE_PYMUPDF_TEXT = "pymupdf_text"
 
 
 @dataclass(frozen=True)
@@ -253,25 +252,6 @@ def get_pymupdf4llm_version() -> str:
         return "UNKNOWN"
 
 
-def resolve_pymupdf_text_flags(flag_names: list[str]) -> Tuple[int, list[str]]:
-    """Resolves PyMuPDF TEXT_* flags into a bitmask."""
-    try:
-        import pymupdf
-    except Exception as exc:
-        raise RuntimeError("PyMuPDF is not available.") from exc
-    mask = 0
-    resolved: list[str] = []
-    for name in flag_names:
-        if not hasattr(pymupdf, name):
-            raise ValueError(f"Unknown PyMuPDF text flag: {name}")
-        value = getattr(pymupdf, name)
-        if not isinstance(value, int):
-            raise ValueError(f"PyMuPDF flag {name} is not an int value.")
-        mask |= value
-        resolved.append(name)
-    return mask, resolved
-
-
 def compute_text_metrics(pages_text: list[str], markdown: str) -> Dict[str, float]:
     """Computes basic metrics from extracted text and markdown."""
     pages = len(pages_text)
@@ -286,52 +266,6 @@ def compute_text_metrics(pages_text: list[str], markdown: str) -> Dict[str, floa
         "textItems": text_items,
         "tables": 0,
         "textCharsPerPageAvg": avg,
-    }
-
-
-def compute_split_spacing(
-    pages_text: list[str], pymupdf_config: Dict[str, Any]
-) -> Optional[Dict[str, float]]:
-    """Computes a split-spacing suspicion score from extracted text."""
-    split_config = pymupdf_config.get("splitDetection", {}) if pymupdf_config else {}
-    if not split_config.get("enabled", False):
-        return None
-    threshold = float(split_config.get("singleCharTokenRatioThreshold", 0.0))
-    min_tokens = int(split_config.get("minTokenCount", 0))
-    min_run = int(split_config.get("minSingleCharRun", 0))
-    tokens: list[str] = []
-    for text in pages_text:
-        tokens.extend(re.findall(r"\S+", text))
-    token_count = len(tokens)
-    if token_count == 0:
-        return {
-            "score": 0.0,
-            "suspicious": False,
-            "singleCharTokenRatio": 0.0,
-            "singleCharRuns": 0.0,
-        }
-    single_char_count = sum(1 for token in tokens if len(token) == 1)
-    single_char_ratio = single_char_count / token_count
-    runs = 0
-    current_run = 0
-    for token in tokens:
-        if len(token) == 1:
-            current_run += 1
-        else:
-            if current_run >= min_run:
-                runs += 1
-            current_run = 0
-    if current_run >= min_run:
-        runs += 1
-    score = min(1.0, single_char_ratio / threshold) if threshold > 0 else 0.0
-    suspicious = token_count >= min_tokens and (
-        (threshold > 0 and single_char_ratio >= threshold) or runs > 0
-    )
-    return {
-        "score": score,
-        "suspicious": suspicious,
-        "singleCharTokenRatio": single_char_ratio,
-        "singleCharRuns": float(runs),
     }
 
 def _try_import_attr(module_name: str, attr_name: str) -> bool:
@@ -417,11 +351,6 @@ def get_pymupdf_capabilities() -> Dict[str, Any]:
     pymupdf4llm_ok, pymupdf4llm_reason = check_module_available("pymupdf4llm")
     layout_ok, layout_reason = check_module_available("pymupdf.layout")
     return {
-        "pymupdf": {
-            "available": pymupdf_ok,
-            "reason": pymupdf_reason,
-            "version": get_pymupdf_version() if pymupdf_ok else "UNKNOWN",
-        },
         "pymupdf4llm": {
             "available": pymupdf_ok and pymupdf4llm_ok,
             "reason": pymupdf4llm_reason if not pymupdf4llm_ok else pymupdf_reason,
@@ -1130,7 +1059,7 @@ def build_engine_meta(
 def normalize_engine(value: Optional[str]) -> str:
     """Normalizes engine values to supported identifiers."""
     normalized = str(value or ENGINE_DOCLING).strip().lower()
-    if normalized in {ENGINE_DOCLING, ENGINE_PYMUPDF4LLM, ENGINE_PYMUPDF_TEXT}:
+    if normalized in {ENGINE_DOCLING, ENGINE_PYMUPDF4LLM}:
         return normalized
     return ENGINE_DOCLING
 
@@ -1145,149 +1074,6 @@ def resolve_layout_mode(
     return str(
         pymupdf_config.get("pymupdf4llm", {}).get("layoutModeDefault", "layout")
     )
-
-
-def run_pymupdf_text_conversion(
-    args: argparse.Namespace,
-    config: Dict[str, Any],
-    pymupdf_config: Dict[str, Any],
-    job_id: Optional[str],
-    python_startup_ms: Optional[int],
-) -> int:
-    """Runs a PyMuPDF text extraction workflow."""
-    export_dir = os.path.join(args.data_dir, "exports", args.doc_id)
-    os.makedirs(export_dir, exist_ok=True)
-    meta_path = os.path.join(export_dir, "meta.json")
-    text_config = pymupdf_config.get("pymupdf_text", {})
-    text_flags = list(text_config.get("textFlags", []))
-    text_kind = str(text_config.get("getTextKind", "text"))
-    mask, resolved_flags = resolve_pymupdf_text_flags(text_flags)
-
-    engine_requested = {
-        "name": ENGINE_PYMUPDF_TEXT,
-        "getTextKind": text_kind,
-        "flags": {"names": resolved_flags},
-    }
-    engine_effective = {
-        "name": ENGINE_PYMUPDF_TEXT,
-        "getTextKind": text_kind,
-        "flags": {"mask": mask, "names": resolved_flags},
-        "pymupdfVersion": get_pymupdf_version(),
-    }
-    engine_meta = build_engine_meta(engine_requested, engine_effective)
-    startup_ms = (
-        python_startup_ms
-        if python_startup_ms is not None
-        else int((time.perf_counter() - SCRIPT_START) * 1000)
-    )
-    meta = build_pymupdf_meta(args.doc_id, args.input, config, startup_ms, engine_meta)
-    start = time.time()
-
-    try:
-        emit_progress("INIT", "Preparing PyMuPDF extraction.", 5, job_id)
-        if not args.input.lower().endswith(".pdf"):
-            raise ValueError("PyMuPDF engines require PDF input.")
-        import pymupdf
-
-        doc = pymupdf.open(args.input)
-        pages_text: list[str] = []
-        total_pages = doc.page_count
-        try:
-            for index in range(total_pages):
-                page = doc.load_page(index)
-                text = page.get_text(text_kind, flags=mask)
-                pages_text.append(text)
-                progress = 15 + int(((index + 1) / max(total_pages, 1)) * 55)
-                emit_progress(
-                    "EXTRACT_PYMUPDF",
-                    f"Page {index + 1}/{total_pages}",
-                    progress,
-                    job_id,
-                )
-        finally:
-            doc.close()
-
-        markdown = "\n\n---\n\n".join(pages_text)
-        emit_progress("METRICS", "Computing metrics.", 75, job_id)
-        metrics = compute_text_metrics(pages_text, markdown)
-        split_spacing = compute_split_spacing(pages_text, pymupdf_config)
-        if split_spacing:
-            metrics["splitSpacing"] = split_spacing
-
-        emit_progress("GATES", "Evaluating quality gates.", 85, job_id)
-        gates_passed, failed, evaluated = evaluate_gates(metrics, config)
-
-        max_pages = config.get("limits", {}).get("maxPages", 0)
-        if max_pages and metrics["pages"] > max_pages:
-            failed.append(
-                {
-                    "code": "LIMIT_MAX_PAGES",
-                    "message": "Page count exceeds maxPages limit.",
-                    "actual": metrics["pages"],
-                    "expectedOp": "<=",
-                    "expected": max_pages,
-                }
-            )
-            gates_passed = False
-
-        status = "SUCCESS" if gates_passed else "FAILED"
-        meta["metrics"] = metrics
-        meta["qualityGates"]["passed"] = gates_passed
-        meta["qualityGates"]["failedGates"] = failed
-        meta["qualityGates"]["evaluated"] = evaluated
-        meta["processing"]["status"] = status
-        meta["processing"]["stage"] = "DONE" if status == "SUCCESS" else "FAILED"
-
-        if gates_passed:
-            emit_progress("WRITE_OUTPUTS", "Writing outputs.", 92, job_id)
-            md_path = os.path.join(export_dir, "output.md")
-            json_path = os.path.join(export_dir, "output.json")
-            with open(md_path, "w", encoding="utf-8") as handle:
-                handle.write(markdown)
-            output_payload = {
-                "engine": ENGINE_PYMUPDF_TEXT,
-                "flags": {"mask": mask, "names": resolved_flags},
-                "pages": [
-                    {"page": idx + 1, "text": text}
-                    for idx, text in enumerate(pages_text)
-                ],
-            }
-            with open(json_path, "w", encoding="utf-8") as handle:
-                json.dump(output_payload, handle)
-            meta["outputs"] = {
-                "markdownPath": md_path,
-                "jsonPath": json_path,
-                "bytes": {
-                    "markdown": len(markdown.encode("utf-8")),
-                    "json": len(json.dumps(output_payload).encode("utf-8")),
-                },
-            }
-        else:
-            meta["outputs"] = {
-                "markdownPath": None,
-                "jsonPath": None,
-                "bytes": {"markdown": 0, "json": 0},
-            }
-
-        meta["processing"]["exitCode"] = 0
-    except Exception as exc:
-        meta["processing"]["status"] = "FAILED"
-        meta["processing"]["stage"] = "FAILED"
-        meta["processing"]["exitCode"] = 1
-        meta["processing"]["message"] = "Processing failed."
-        meta["processing"]["failure"] = {"code": "WORKER_EXCEPTION", "message": str(exc)}
-        meta["logs"]["stderrTail"] = clamp_tail(
-            str(exc), config["limits"]["stderrTailKb"]
-        )
-        emit_progress("FAILED", "Processing failed.", 100, job_id)
-        record_processing_end(meta, start)
-        write_json(meta_path, meta)
-        return 1
-
-    record_processing_end(meta, start)
-    emit_progress("DONE", "Processing complete.", 100, job_id)
-    write_json(meta_path, meta)
-    return 0
 
 
 def normalize_pymupdf4llm_result(
@@ -1418,10 +1204,6 @@ def run_pymupdf4llm_conversion(
         markdown = "\n\n---\n\n".join(markdown_pages)
         emit_progress("METRICS", "Computing metrics.", 75, job_id)
         metrics = compute_text_metrics(pages_text, markdown)
-        split_spacing = compute_split_spacing(pages_text, pymupdf_config)
-        if split_spacing:
-            metrics["splitSpacing"] = split_spacing
-
         emit_progress("GATES", "Evaluating quality gates.", 85, job_id)
         gates_passed, failed, evaluated = evaluate_gates(metrics, config)
 
@@ -1511,16 +1293,11 @@ def run_pymupdf4llm_conversion(
 def run_pymupdf_conversion(
     args: argparse.Namespace,
     config: Dict[str, Any],
-    engine: str,
     job_id: Optional[str],
     python_startup_ms: Optional[int],
 ) -> int:
     """Routes conversion for PyMuPDF engines."""
     pymupdf_config = load_pymupdf_config(getattr(args, "pymupdf_config", None))
-    if engine == ENGINE_PYMUPDF_TEXT:
-        return run_pymupdf_text_conversion(
-            args, config, pymupdf_config, job_id, python_startup_ms
-        )
     layout_mode = resolve_layout_mode(getattr(args, "layout_mode", None), pymupdf_config)
     return run_pymupdf4llm_conversion(
         args, config, pymupdf_config, layout_mode, job_id, python_startup_ms
@@ -1536,9 +1313,7 @@ def run_conversion(
     config = load_config(args.gates)
     engine = normalize_engine(getattr(args, "engine", None))
     if engine != ENGINE_DOCLING:
-        return run_pymupdf_conversion(
-            args, config, engine, job_id, python_startup_ms
-        )
+        return run_pymupdf_conversion(args, config, job_id, python_startup_ms)
 
     docling_config = load_docling_config(
         getattr(args, "docling_config", None),

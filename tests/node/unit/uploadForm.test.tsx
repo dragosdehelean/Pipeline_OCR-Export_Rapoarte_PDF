@@ -175,14 +175,10 @@ describe("UploadForm", () => {
           config: healthConfig,
           configError: null,
           pymupdf: {
-            engines: ["docling", "pymupdf4llm", "pymupdf_text"],
+            engines: ["docling", "pymupdf4llm"],
             defaultEngine: "docling",
             layoutModeDefault: "layout",
             availability: {
-              pymupdf_text: {
-                available: false,
-                reason: "IMPORT_PYMUPDF_FAILED"
-              },
               pymupdf4llm: {
                 available: false,
                 reason: "IMPORT_PYMUPDF4LLM_FAILED"
@@ -213,16 +209,11 @@ describe("UploadForm", () => {
     const pymupdf4llmOption = options.find(
       (option) => option.value === "pymupdf4llm"
     );
-    const pymupdfTextOption = options.find(
-      (option) => option.value === "pymupdf_text"
-    );
 
     expect(doclingOption).toBeTruthy();
     expect(pymupdf4llmOption).toBeTruthy();
-    expect(pymupdfTextOption).toBeTruthy();
     expect(doclingOption?.disabled).toBe(false);
     expect(pymupdf4llmOption?.disabled).toBe(true);
-    expect(pymupdfTextOption?.disabled).toBe(true);
   });
 
   it("shows a post-upload banner with a details link", async () => {

@@ -106,14 +106,7 @@ export const doclingConfigSchema = z
 
 export type DoclingConfig = z.infer<typeof doclingConfigSchema>;
 
-const engineSchema = z.enum(["docling", "pymupdf4llm", "pymupdf_text"]);
-
-const pymupdfTextSchema = z
-  .object({
-    textFlags: z.array(z.string()),
-    getTextKind: z.string()
-  })
-  .strict();
+const engineSchema = z.enum(["docling", "pymupdf4llm"]);
 
 const pymupdf4llmSchema = z
   .object({
@@ -138,23 +131,12 @@ const pymupdf4llmSchema = z
   })
   .strict();
 
-const pymupdfSplitDetectionSchema = z
-  .object({
-    enabled: z.boolean(),
-    singleCharTokenRatioThreshold: z.number(),
-    minTokenCount: z.number(),
-    minSingleCharRun: z.number()
-  })
-  .strict();
-
 export const pymupdfConfigSchema = z
   .object({
     version: z.number(),
     defaultEngine: engineSchema,
     engines: z.array(engineSchema),
-    pymupdf_text: pymupdfTextSchema,
-    pymupdf4llm: pymupdf4llmSchema,
-    splitDetection: pymupdfSplitDetectionSchema
+    pymupdf4llm: pymupdf4llmSchema
   })
   .strict()
   .superRefine((value, ctx) => {
