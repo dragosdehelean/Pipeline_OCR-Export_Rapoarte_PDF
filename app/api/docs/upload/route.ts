@@ -79,7 +79,7 @@ export async function POST(req: Request) {
   const file = formData.get("file");
   const deviceOverride = parseDeviceOverride(formData.get("deviceOverride"));
   const profileOverride = parseProfile(formData.get("profile"));
-  const requestedEngine = parseEngine(formData.get("engine"));
+  const parsedEngine = parseEngine(formData.get("engine"));
   if (!isFileLike(file)) {
     return jsonError({
       status: 400,
@@ -91,6 +91,7 @@ export async function POST(req: Request) {
 
   const mimeType = file.type;
   const extension = resolveExtension(getFileExtension(file.name), mimeType);
+  const isPdf = mimeType === "application/pdf";
 
   if (!config.accept.mimeTypes.includes(mimeType)) {
     return jsonError({
@@ -120,41 +121,34 @@ export async function POST(req: Request) {
     });
   }
 
+  if (isPdf && parsedEngine.invalid) {
+    return jsonError({
+      status: 400,
+      stage: "VALIDATION",
+      message: "Unsupported engine selection.",
+      requestId
+    });
+  }
+
+  const requestedEngine = isPdf ? parsedEngine.engine : null;
+
   const id = generateDocId();
   const startedAt = new Date();
   const stageTimer = createStageTimer("UPLOAD", startedAt.getTime());
 
-  let engine = "docling";
-  if (requestedEngine) {
-    try {
-      const pymupdfConfig = await loadPyMuPDFConfig();
-      engine = requestedEngine ?? pymupdfConfig.defaultEngine ?? "docling";
-      if (!pymupdfConfig.engines.includes(engine)) {
-        return jsonError({
-          status: 400,
-          stage: "VALIDATION",
-          message: "Unsupported engine selection.",
-          requestId
-        });
+  let engine: EngineName = "docling";
+  if (isPdf) {
+    if (requestedEngine) {
+      engine = requestedEngine;
+    } else {
+      try {
+        const pymupdfConfig = await loadPyMuPDFConfig();
+        const candidate = pymupdfConfig.defaultEngine ?? "docling";
+        engine = pymupdfConfig.engines.includes(candidate) ? candidate : "docling";
+      } catch (error) {
+        engine = "docling";
       }
-    } catch (error) {
-      return jsonError({
-        status: 500,
-        stage: "CONFIG",
-        message: (error as Error).message || "Failed to load pymupdf config.",
-        requestId
-      });
     }
-  }
-
-  const isPdf = mimeType === "application/pdf";
-  if (!isPdf && engine !== "docling") {
-    return jsonError({
-      status: 400,
-      stage: "VALIDATION",
-      message: "Selected engine requires a PDF upload.",
-      requestId
-    });
   }
 
   await ensureDataDirs();
@@ -493,6 +487,8 @@ type ProgressState = {
   progress: number;
 };
 
+type EngineName = "docling" | "pymupdf4llm";
+
 type StageTiming = {
   stage: string;
   durationMs: number;
@@ -706,15 +702,20 @@ function parseProfile(value: FormDataEntryValue | null) {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function parseEngine(value: FormDataEntryValue | null) {
+function parseEngine(
+  value: FormDataEntryValue | null
+): { hasValue: boolean; engine: EngineName | null; invalid: boolean } {
   if (typeof value !== "string") {
-    return null;
+    return { hasValue: false, engine: null, invalid: false };
   }
   const normalized = value.trim().toLowerCase();
-  if (normalized === "docling" || normalized === "pymupdf4llm") {
-    return normalized;
+  if (!normalized) {
+    return { hasValue: false, engine: null, invalid: false };
   }
-  return null;
+  if (normalized === "docling" || normalized === "pymupdf4llm") {
+    return { hasValue: true, engine: normalized, invalid: false };
+  }
+  return { hasValue: true, engine: null, invalid: true };
 }
 
 function resolveStartedAt(meta: MetaFile, fallback: Date) {

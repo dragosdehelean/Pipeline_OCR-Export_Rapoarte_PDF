@@ -79,6 +79,15 @@ def test_export_doc_to_dict_missing_hooks_raises():
         export_doc_to_dict(NoExport())
 
 
+def test_build_pymupdf_meta_sets_mime_type(tmp_path: Path):
+    file_path = tmp_path / "input.pdf"
+    file_path.write_text("%PDF-1.4", encoding="utf-8")
+    config = {"limits": {"processTimeoutSec": 1}, "version": 1, "strict": True}
+    engine_meta = {"requested": {"name": "pymupdf4llm"}, "effective": {"name": "pymupdf4llm"}}
+    meta = convert.build_pymupdf_meta("doc-1", str(file_path), config, 0, engine_meta)
+    assert meta["source"]["mimeType"] == "application/pdf"
+
+
 def test_compute_metrics_uses_pages_attribute():
     class PagesDoc:
         def __init__(self):

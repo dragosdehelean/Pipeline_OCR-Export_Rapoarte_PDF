@@ -29,10 +29,27 @@ LAST_JOB_PROOF: Optional[Dict[str, Any]] = None
 
 ENGINE_DOCLING = "docling"
 ENGINE_PYMUPDF4LLM = "pymupdf4llm"
+PYMUPDF4LLM_MARKDOWN_KEYS = {
+    "write_images",
+    "embed_images",
+    "dpi",
+    "page_chunks",
+    "extract_words",
+    "force_text",
+    "show_progress",
+    "margins",
+    "table_strategy",
+    "graphics_limit",
+    "ignore_code",
+}
 
 
 class LayoutUnavailableError(RuntimeError):
     """Raised when PyMuPDF4LLM layout-only requirements are not met."""
+
+
+class ConfigValidationError(ValueError):
+    """Raised when the PyMuPDF4LLM config is invalid."""
 
 
 @dataclass(frozen=True)
@@ -1009,7 +1026,7 @@ def build_pymupdf_meta(
         "createdAt": now_iso(),
         "source": {
             "originalFileName": os.path.basename(input_path),
-            "mimeType": "",
+            "mimeType": "application/pdf",
             "sizeBytes": size_bytes,
             "sha256": sha256_file(input_path),
             "storedPath": input_path,
@@ -1112,6 +1129,21 @@ def normalize_pymupdf4llm_result(
     return markdown, page_chunks
 
 
+def validate_pymupdf4llm_markdown_config(value: Any) -> Dict[str, Any]:
+    """Validates toMarkdown keys against the supported allowlist."""
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ConfigValidationError("PyMuPDF4LLM toMarkdown config must be an object.")
+    unknown = sorted(set(value.keys()) - PYMUPDF4LLM_MARKDOWN_KEYS)
+    if unknown:
+        joined = ", ".join(unknown)
+        raise ConfigValidationError(
+            f"PyMuPDF4LLM toMarkdown config contains unsupported keys: {joined}"
+        )
+    return dict(value)
+
+
 def run_pymupdf4llm_conversion(
     args: argparse.Namespace,
     config: Dict[str, Any],
@@ -1127,13 +1159,11 @@ def run_pymupdf4llm_conversion(
     require_layout = bool(llm_config.get("requireLayout", True))
     if not require_layout:
         raise ValueError("PyMuPDF4LLM must run in layout-only mode.")
-    to_markdown_config = dict(llm_config.get("toMarkdown", {}))
-    # Keep stdout JSON-only; UI progress comes from emit_progress events.
-    to_markdown_config["show_progress"] = False
+    raw_markdown_config = llm_config.get("toMarkdown", {})
     engine_requested = {
         "name": ENGINE_PYMUPDF4LLM,
         "layoutOnly": True,
-        "toMarkdown": to_markdown_config,
+        "toMarkdown": raw_markdown_config,
     }
     engine_effective = {
         "name": ENGINE_PYMUPDF4LLM,
@@ -1152,6 +1182,11 @@ def run_pymupdf4llm_conversion(
     start = time.time()
 
     try:
+        to_markdown_config = validate_pymupdf4llm_markdown_config(raw_markdown_config)
+        # Keep stdout JSON-only; UI progress comes from emit_progress events.
+        to_markdown_config["show_progress"] = False
+        engine_requested["toMarkdown"] = to_markdown_config
+
         emit_progress("INIT", "Preparing PyMuPDF4LLM extraction.", 5, job_id)
         if not args.input.lower().endswith(".pdf"):
             raise ValueError("PyMuPDF engines require PDF input.")
@@ -1278,6 +1313,9 @@ def run_pymupdf4llm_conversion(
         if isinstance(exc, LayoutUnavailableError):
             user_message = "PyMuPDF4LLM layout-only: layout unavailable"
             failure_code = "PYMUPDF_LAYOUT_UNAVAILABLE"
+        elif isinstance(exc, ConfigValidationError):
+            user_message = error_message or "Invalid PyMuPDF4LLM config."
+            failure_code = "PYMUPDF_CONFIG_INVALID"
         else:
             user_message = "Processing failed."
             failure_code = "WORKER_EXCEPTION"

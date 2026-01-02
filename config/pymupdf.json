@@ -15,8 +15,7 @@
       "margins": 0,
       "table_strategy": "lines_strict",
       "graphics_limit": 0,
-      "ignore_code": false,
-      "extract_tables": true
+      "ignore_code": false
     }
   }
 }

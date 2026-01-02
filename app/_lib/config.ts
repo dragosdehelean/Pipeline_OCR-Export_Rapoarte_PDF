@@ -123,8 +123,7 @@ const pymupdf4llmSchema = z
         margins: z.number(),
         table_strategy: z.string(),
         graphics_limit: z.number(),
-        ignore_code: z.boolean(),
-        extract_tables: z.boolean()
+        ignore_code: z.boolean()
       })
       .strict()
   })

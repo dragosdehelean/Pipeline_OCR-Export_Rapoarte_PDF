@@ -555,7 +555,6 @@ def _write_pymupdf_config(path: Path) -> None:
                 "table_strategy": "lines_strict",
                 "graphics_limit": 0,
                 "ignore_code": False,
-                "extract_tables": True,
             },
         },
     }
@@ -580,6 +579,7 @@ def test_run_conversion_pymupdf4llm_layout(tmp_path: Path, monkeypatch: pytest.M
             return None
 
     def fake_markdown(doc, pages=None, **kwargs):
+        assert "extract_tables" not in kwargs
         return {"markdown": text_body, "page_chunks": {"page": pages[0]}}
 
     def fake_json(doc, pages=None):
@@ -661,3 +661,40 @@ def test_run_conversion_pymupdf4llm_layout_missing(
     assert (
         meta["processing"]["message"] == "PyMuPDF4LLM layout-only: layout unavailable"
     )
+
+
+def test_run_conversion_pymupdf4llm_rejects_unknown_markdown_keys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    config = load_repo_config()
+    dummy_pymupdf = types.SimpleNamespace(__doc__="PyMuPDF 1.2.3")
+    dummy_pymupdf4llm = types.SimpleNamespace(to_markdown=lambda *_args, **_kwargs: "")
+    dummy_layout = types.SimpleNamespace()
+    monkeypatch.setitem(sys.modules, "pymupdf", dummy_pymupdf)
+    monkeypatch.setitem(sys.modules, "pymupdf4llm", dummy_pymupdf4llm)
+    monkeypatch.setitem(sys.modules, "pymupdf.layout", dummy_layout)
+
+    pymupdf_config_path = tmp_path / "pymupdf.json"
+    _write_pymupdf_config(pymupdf_config_path)
+    payload = json.loads(pymupdf_config_path.read_text(encoding="utf-8"))
+    payload["pymupdf4llm"]["toMarkdown"]["unsupported_key"] = True
+    pymupdf_config_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    input_path = tmp_path / "input.pdf"
+    input_path.write_text("%PDF-1.4", encoding="utf-8")
+    args = types.SimpleNamespace(
+        input=str(input_path),
+        doc_id="doc-pymupdf-config-invalid",
+        data_dir=str(tmp_path),
+        gates=str(CONFIG_PATH),
+        docling_config=str(DOCLING_CONFIG_PATH),
+        pymupdf_config=str(pymupdf_config_path),
+        engine="pymupdf4llm",
+    )
+    exit_code = convert.run_conversion(args)
+    assert exit_code == 1
+    meta_path = tmp_path / "exports" / "doc-pymupdf-config-invalid" / "meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert meta["processing"]["status"] == "FAILED"
+    assert meta["processing"]["failure"]["code"] == "PYMUPDF_CONFIG_INVALID"
+    assert "unsupported_key" in meta["processing"]["failure"]["details"]
