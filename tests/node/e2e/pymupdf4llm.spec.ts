@@ -89,7 +89,7 @@ async function waitForDocCompletion(page: Page, docId: string) {
   return finalStatus;
 }
 
-test.describe.serial("pymupdf4llm e2e", () => {
+test.describe("pymupdf4llm e2e", () => {
   test("upload pdf with pymupdf4llm succeeds", async ({ page }) => {
     test.setTimeout(uploadTimeoutMs * 2);
     await gotoAndWaitForUploadReady(page);

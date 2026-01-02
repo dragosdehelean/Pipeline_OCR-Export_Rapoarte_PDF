@@ -40,6 +40,8 @@ export default defineConfig({
   testIgnore: ["**/ux-heuristics-audit.spec.ts"],
   outputDir: "./tests/node/e2e/test-results",
   timeout: 60_000,
+  workers: process.env.CI ? 2 : 3,
+  fullyParallel: false,
   use: {
     baseURL,
     trace: "retain-on-failure"

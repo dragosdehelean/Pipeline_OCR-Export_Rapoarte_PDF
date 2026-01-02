@@ -157,7 +157,7 @@ async function getTextChars(row: Locator) {
   return Number(digitsOnly || 0);
 }
 
-test.describe.serial("quality-critical e2e", () => {
+test.describe("quality-critical e2e", () => {
 
   test("advanced docling profiles succeed", async ({ page }) => {
     test.setTimeout(uploadTimeoutMs * 6);
@@ -301,12 +301,16 @@ test.describe.serial("quality-critical e2e", () => {
   });
 
   test("upload bad pdf -> FAILED -> gates + no exports", async ({ page }) => {
-    test.setTimeout(uploadTimeoutMs * 2);
+    test.setTimeout(uploadTimeoutMs * 3);
     await gotoAndWaitForUploadReady(page);
 
     const badDocId = await uploadFile(page, badPdf);
+    await waitForDocStatus(page, badDocId, "FAILED");
 
-    const badRow = await getDocRow(page, "scan_like_no_text.pdf");
+    const badRow = page
+      .locator(".list-item", { has: page.locator(`a[href="/docs/${badDocId}"]`) })
+      .first();
+    await expect(badRow).toBeVisible();
     await expect(badRow.getByText("FAILED")).toBeVisible();
 
     const goodDocId = await uploadFile(page, goodPdf);
@@ -316,10 +320,7 @@ test.describe.serial("quality-critical e2e", () => {
       .first();
     await expect(goodRow).toBeVisible();
     const goodStatus = goodRow.locator(".badge");
-    await expect.poll(
-      async () => (await goodStatus.textContent())?.trim(),
-      { timeout: uploadTimeoutMs }
-    ).toBe("SUCCESS");
+    await expect(goodStatus).toHaveText("SUCCESS");
     const goodTextChars = await getTextChars(goodRow);
     const badTextChars = await getTextChars(badRow);
     expect(goodTextChars).toBeGreaterThanOrEqual(minTextChars);
@@ -327,12 +328,12 @@ test.describe.serial("quality-critical e2e", () => {
 
     const searchInput = page.getByRole("searchbox", { name: "Search documents" });
     await searchInput.fill("scan_like");
-    await expect(page.getByRole("link", { name: "scan_like_no_text.pdf" })).toBeVisible();
-    await expect(page.locator("a", { hasText: "one_page_report.pdf" })).toHaveCount(0);
+    await expect(page.locator(`a.doc-link[href="/docs/${badDocId}"]`)).toBeVisible();
+    await expect(page.locator(`a.doc-link[href="/docs/${goodDocId}"]`)).toHaveCount(0);
 
     await page.getByRole("button", { name: "Clear" }).click();
     await page.getByRole("tab", { name: "Failed" }).click();
-    await expect(page.getByRole("link", { name: "scan_like_no_text.pdf" })).toBeVisible();
+    await expect(page.locator(`a.doc-link[href="/docs/${badDocId}"]`)).toBeVisible();
     await expect(
       page.locator(".list-item", {
         has: page.locator(`a[href="/docs/${goodDocId}"]`)
@@ -360,16 +361,22 @@ test.describe.serial("quality-critical e2e", () => {
   });
 
   test("delete document removes it from the list", async ({ page }) => {
+    test.setTimeout(uploadTimeoutMs * 2);
     await gotoAndWaitForUploadReady(page);
 
-    const badId = await getDocId(page, "scan_like_no_text.pdf");
-    const badRow = await getDocRow(page, "scan_like_no_text.pdf");
+    const badDocId = await uploadFile(page, badPdf);
+    await waitForDocStatus(page, badDocId, "FAILED");
+
+    const badRow = page
+      .locator(".list-item", { has: page.locator(`a[href="/docs/${badDocId}"]`) })
+      .first();
+    await expect(badRow).toBeVisible();
     page.once("dialog", (dialog) => dialog.accept());
     await badRow.getByRole("button", { name: /Delete/ }).click();
 
-    await expect(page.getByRole("link", { name: "scan_like_no_text.pdf" })).toHaveCount(0);
+    await expect(page.locator(`a.doc-link[href="/docs/${badDocId}"]`)).toHaveCount(0);
 
-    const metaResponse = await page.request.get(`/api/docs/${badId}`);
+    const metaResponse = await page.request.get(`/api/docs/${badDocId}`);
     expect(metaResponse.status()).toBe(404);
   });
 });
