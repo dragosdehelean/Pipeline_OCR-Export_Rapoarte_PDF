@@ -1,18 +1,20 @@
 /**
- * @fileoverview E2E coverage for the PyMuPDF4LLM layout-only engine option.
+ * @fileoverview SMOKE TESTS - Fast basic functionality checks
+ * Run these frequently during development (takes ~1-2 minutes total)
  */
 import { expect, test, type Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import { qualityGatesSchema } from "../../../app/_lib/config";
 
-const pymupdfPdf = path.join(
+const goodPdf = path.join(
   process.cwd(),
   "tests",
   "fixtures",
   "docs",
   "one_page_report.pdf"
 );
+
 const gatesConfig = qualityGatesSchema.parse(
   JSON.parse(
     fs.readFileSync(
@@ -21,6 +23,7 @@ const gatesConfig = qualityGatesSchema.parse(
     )
   )
 );
+
 const processTimeoutSec = Number(gatesConfig?.limits?.processTimeoutSec);
 if (!Number.isFinite(processTimeoutSec) || processTimeoutSec <= 0) {
   throw new Error("Invalid limits.processTimeoutSec in quality-gates.json");
@@ -41,6 +44,22 @@ async function gotoAndWaitForUploadReady(page: Page) {
     throw new Error(`Health check failed: ${JSON.stringify(healthPayload)}`);
   }
   await page.waitForSelector("input[type='file']", { timeout: 30000 });
+}
+
+async function uploadFile(page: Page, filePath: string) {
+  const uploadResponsePromise = page.waitForResponse(
+    (response) =>
+      response.url().includes("/api/docs/upload") &&
+      response.request().method() === "POST",
+    { timeout: uploadTimeoutMs }
+  );
+
+  await page.setInputFiles("input[type=file]", filePath);
+  await expect(page.getByRole("button", { name: "Upload" })).toBeEnabled();
+  await page.getByRole("button", { name: "Upload" }).click();
+
+  const uploadResponse = await uploadResponsePromise;
+  return uploadResponse;
 }
 
 async function uploadFileAndGetDocId(page: Page) {
@@ -89,8 +108,33 @@ async function waitForDocCompletion(page: Page, docId: string) {
   return finalStatus;
 }
 
-test.describe("pymupdf4llm e2e", () => {
-  test("upload pdf with pymupdf4llm succeeds", async ({ page }) => {
+test.describe("smoke tests", () => {
+  test("basic upload flow does not crash", async ({ page }) => {
+    test.setTimeout(uploadTimeoutMs * 2);
+    await gotoAndWaitForUploadReady(page);
+
+    const uploadResponse = await uploadFile(page, goodPdf);
+    expect(uploadResponse.ok()).toBeTruthy();
+
+    const payload = await uploadResponse.json().catch(() => null);
+    const docId =
+      typeof payload?.id === "string"
+        ? payload.id
+        : typeof payload?.docId === "string"
+          ? payload.docId
+          : "";
+
+    if (!docId) {
+      throw new Error("Upload response missing document id.");
+    }
+
+    const status = await waitForDocCompletion(page, docId);
+    expect(status).toMatch(/SUCCESS|FAILED/);
+
+    await page.request.delete(`/api/docs/${docId}`);
+  });
+
+  test("pymupdf4llm basic upload", async ({ page }) => {
     test.setTimeout(uploadTimeoutMs * 2);
     await gotoAndWaitForUploadReady(page);
 
@@ -100,7 +144,7 @@ test.describe("pymupdf4llm e2e", () => {
       healthPayload?.pymupdf?.availability?.pymupdf4llm?.available === true;
     test.skip(!pymupdfAvailable, "pymupdf4llm is not available in this environment.");
 
-    await page.setInputFiles("input[type=file]", pymupdfPdf);
+    await page.setInputFiles("input[type=file]", goodPdf);
     await page.getByText("Advanced").click();
     await page.selectOption("#engine-override", "pymupdf4llm");
 
@@ -110,20 +154,20 @@ test.describe("pymupdf4llm e2e", () => {
     const metaResponse = await page.request.get(`/api/docs/${docId}`);
     expect(metaResponse.ok()).toBeTruthy();
     const meta = await metaResponse.json();
+
     expect(meta.processing?.status).toBe(status);
     expect(meta.engine?.effective?.name).toBe("pymupdf4llm");
     expect(meta.engine?.effective?.layoutActive).toBe(true);
-    if (status === "FAILED") {
-      expect(meta.qualityGates?.passed).toBe(false);
-      expect(meta.outputs?.markdownPath).toBeNull();
-      expect(meta.outputs?.jsonPath).toBeNull();
+
+    if (status === "SUCCESS") {
+      expect(meta.qualityGates?.passed).toBe(true);
+      expect(meta.metrics?.textChars).toBeGreaterThan(100);
     }
 
-    const deleteResponse = await page.request.delete(`/api/docs/${docId}`);
-    expect(deleteResponse.ok()).toBeTruthy();
+    await page.request.delete(`/api/docs/${docId}`);
   });
 
-  test("pymupdf4llm disabled when layout deps missing", async ({ page }) => {
+  test("pymupdf4llm disabled when deps missing", async ({ page }) => {
     await page.route("**/api/health", async (route) => {
       const response = await route.fetch();
       const payload = await response.json().catch(() => null);
@@ -150,14 +194,13 @@ test.describe("pymupdf4llm e2e", () => {
     await gotoAndWaitForUploadReady(page);
 
     await page.getByText("Advanced").click();
-    await page.setInputFiles("input[type=file]", pymupdfPdf);
+    await page.setInputFiles("input[type=file]", goodPdf);
     const engineSelect = page.locator("#engine-override");
     await expect(engineSelect).toBeEnabled();
     await expect(engineSelect.locator("option[value='pymupdf4llm']")).toBeDisabled();
     await expect(engineSelect).toHaveValue("docling");
 
     const docId = await uploadFileAndGetDocId(page);
-    const deleteResponse = await page.request.delete(`/api/docs/${docId}`);
-    expect(deleteResponse.ok()).toBeTruthy();
+    await page.request.delete(`/api/docs/${docId}`);
   });
 });

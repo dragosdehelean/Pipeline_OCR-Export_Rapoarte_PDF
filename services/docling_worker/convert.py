@@ -1273,6 +1273,7 @@ def run_pymupdf4llm_conversion(
                 pages_text.append(markdown)
                 if chunks is not None:
                     page_chunks.append(chunks)
+
                 if callable(to_json_fn):
                     try:
                         json_pages.append(to_json_fn(doc, pages=[index]))

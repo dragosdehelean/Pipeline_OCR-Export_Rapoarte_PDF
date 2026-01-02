@@ -23,7 +23,14 @@
       "Bash(Get-Content \"C:\\\\Users\\\\drago\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--Programming-Playground-AI-Pipeline-OCR-Export-Rapoarte-PDF\\\\tasks\\\\bb64c17.output\" -Tail 30)",
       "Bash(tasklist:*)",
       "Bash(findstr:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(timeout 120 .venv/Scripts/python:*)",
+      "Bash(tee:*)",
+      "Bash(Get-Content \"C:\\\\Users\\\\drago\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--Programming-Playground-AI-Pipeline-OCR-Export-Rapoarte-PDF\\\\tasks\\\\b4fae1b.output\" -Tail 30)",
+      "Bash(git restore:*)",
+      "Bash(timeout 120 bash:*)",
+      "Bash(services/docling_worker/.venv/Scripts/python.exe tests/python/test_pymupdf4llm_long_report.py)",
+      "Bash(ls:*)"
     ]
   }
 }
