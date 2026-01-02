@@ -378,3 +378,14 @@ def test_normalize_pymupdf4llm_result_dict():
     )
     assert markdown == "md"
     assert chunks == {"page": 1}
+
+
+def test_normalize_pymupdf4llm_result_list_page_chunks():
+    """Test page_chunks=True mode which returns a list of page dicts."""
+    result = [
+        {"text": "Page 1 content", "metadata": {"page": 1}},
+        {"text": "Page 2 content", "metadata": {"page": 2}},
+    ]
+    markdown, chunks = convert.normalize_pymupdf4llm_result(result)
+    assert markdown == "Page 1 content\n\nPage 2 content"
+    assert chunks == result

@@ -1084,6 +1084,27 @@ def build_pymupdf_meta(
     }
 
 
+def sanitize_for_json(obj: Any) -> Any:
+    """Recursively sanitizes objects for JSON serialization."""
+    if obj is None or isinstance(obj, (str, int, float, bool)):
+        return obj
+    if hasattr(obj, "__iter__") and not isinstance(obj, (str, bytes)):
+        if isinstance(obj, dict):
+            return {k: sanitize_for_json(v) for k, v in obj.items()}
+        try:
+            return [sanitize_for_json(item) for item in obj]
+        except TypeError:
+            pass
+    # Try to convert PyMuPDF Rect and similar objects to tuples/lists
+    if hasattr(obj, "__iter__") and hasattr(obj, "__len__"):
+        try:
+            return list(obj)
+        except (TypeError, ValueError):
+            pass
+    # Fallback: convert to string representation
+    return str(obj)
+
+
 def write_json(path: str, payload: Dict[str, Any]) -> None:
     """Writes JSON to disk with indentation."""
     with open(path, "w", encoding="utf-8") as handle:
@@ -1131,6 +1152,18 @@ def normalize_pymupdf4llm_result(
             markdown = result[0]
         if len(result) > 1:
             page_chunks = result[1]
+        return markdown, page_chunks
+    if isinstance(result, list) and result:
+        # When page_chunks=True, pymupdf4llm returns a list of page dicts
+        page_chunks = result
+        # Extract text from each page chunk
+        text_parts = []
+        for chunk in result:
+            if isinstance(chunk, dict):
+                text = chunk.get("text") or chunk.get("markdown") or chunk.get("md") or ""
+                if isinstance(text, str):
+                    text_parts.append(text)
+        markdown = "\n\n".join(text_parts) if text_parts else ""
         return markdown, page_chunks
     if isinstance(result, dict):
         if isinstance(result.get("markdown"), str):
@@ -1287,13 +1320,13 @@ def run_pymupdf4llm_conversion(
                 output_payload = {
                     "engine": ENGINE_PYMUPDF4LLM,
                     "layoutActive": True,
-                    "pages": json_pages,
+                    "pages": sanitize_for_json(json_pages),
                 }
             else:
                 output_payload = {
                     "engine": ENGINE_PYMUPDF4LLM,
                     "layoutActive": True,
-                    "pages": page_chunks
+                    "pages": sanitize_for_json(page_chunks)
                     if page_chunks
                     else [
                         {"page": idx + 1, "markdown": text}

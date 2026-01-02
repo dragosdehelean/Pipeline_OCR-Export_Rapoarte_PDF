@@ -1,0 +1,444 @@
+# E2E Testing Guidelines (Playwright)
+
+This document defines the mandatory practices for writing and maintaining E2E tests with Playwright in this project.
+
+## 1. Test Isolation
+
+Each test MUST be completely isolated from other tests.
+
+**Requirements:**
+- Tests run independently with their own local storage, session storage, cookies
+- No test should depend on the state created by another test
+- Use `beforeEach` hooks for common setup, not shared state between tests
+
+```typescript
+// ✅ Correct - isolated setup
+test.beforeEach(async ({ page }) => {
+  await page.goto('/');
+});
+
+test('first test', async ({ page }) => {
+  // Fresh state
+});
+
+test('second test', async ({ page }) => {
+  // Also fresh state, independent of first test
+});
+```
+
+```typescript
+// ❌ Forbidden - shared state between tests
+let sharedData;
+
+test('creates data', async ({ page }) => {
+  sharedData = await createSomething();
+});
+
+test('uses data', async ({ page }) => {
+  await useSomething(sharedData); // Depends on previous test
+});
+```
+
+**Source:** https://playwright.dev/docs/best-practices#make-tests-as-isolated-as-possible
+
+---
+
+## 2. Web-First Assertions
+
+ALWAYS use web-first assertions with `await` before `expect`.
+
+**Requirements:**
+- Use `await expect(locator).toBeVisible()` pattern
+- NEVER use `expect(await locator.isVisible()).toBe(true)` pattern
+- Web-first assertions auto-wait for conditions to be met
+
+```typescript
+// ✅ Correct - web-first assertion with auto-wait
+await expect(page.getByText('Welcome')).toBeVisible();
+await expect(page.getByRole('button')).toBeEnabled();
+await expect(page.getByTestId('status')).toHaveText('Success');
+```
+
+```typescript
+// ❌ Forbidden - manual assertions without auto-wait
+expect(await page.getByText('Welcome').isVisible()).toBe(true);
+expect(await page.getByRole('button').isEnabled()).toBe(true);
+```
+
+**Source:** https://playwright.dev/docs/best-practices#use-web-first-assertions
+
+---
+
+## 3. User-Facing Locators
+
+Prioritize locators that reflect how users interact with the page.
+
+**Priority order (highest to lowest):**
+1. `getByRole()` - ARIA roles (buttons, links, checkboxes)
+2. `getByLabel()` - Form controls by associated label
+3. `getByPlaceholder()` - Inputs by placeholder text
+4. `getByText()` - Non-interactive elements by visible text
+5. `getByAltText()` - Images by alt attribute
+6. `getByTitle()` - Elements by title attribute
+7. `getByTestId()` - ONLY as fallback when above options unavailable
+
+```typescript
+// ✅ Correct - user-facing locators
+await page.getByRole('button', { name: 'Submit' }).click();
+await page.getByLabel('Email').fill('user@example.com');
+await page.getByRole('link', { name: 'Sign up' }).click();
+await page.getByPlaceholder('Search...').fill('query');
+```
+
+```typescript
+// ❌ Forbidden - implementation-dependent locators
+await page.locator('button.btn-primary').click();
+await page.locator('#email-input').fill('user@example.com');
+await page.locator('div > form > button:nth-child(2)').click();
+await page.locator('//button[@class="submit"]').click();
+```
+
+**Chaining for precision:**
+```typescript
+// ✅ Correct - chained locators for specificity
+const productRow = page.getByRole('listitem').filter({ hasText: 'Product A' });
+await productRow.getByRole('button', { name: 'Add to cart' }).click();
+```
+
+**Source:** https://playwright.dev/docs/locators
+
+---
+
+## 4. No Fixed Timeouts
+
+NEVER use `waitForTimeout` or fixed delays. Rely on Playwright's auto-waiting.
+
+**Requirements:**
+- Use explicit wait conditions, not arbitrary delays
+- Playwright automatically waits for elements to be actionable before interactions
+- For loading states, wait for specific UI indicators
+
+```typescript
+// ✅ Correct - wait for specific conditions
+await page.waitForSelector('[data-testid="content-loaded"]');
+await expect(page.getByText('Data loaded')).toBeVisible();
+await page.waitForResponse('**/api/data');
+await page.waitForLoadState('networkidle');
+```
+
+```typescript
+// ❌ Forbidden - arbitrary delays
+await page.waitForTimeout(2000);
+await page.waitForTimeout(500);
+await new Promise(resolve => setTimeout(resolve, 1000));
+```
+
+**Source:** https://playwright.dev/docs/actionability
+
+---
+
+## 5. Reuse Authentication State
+
+Authenticate once and reuse the signed-in state across tests.
+
+**Setup file:** `auth.setup.ts`
+```typescript
+import { test as setup, expect } from '@playwright/test';
+
+const authFile = 'playwright/.auth/user.json';
+
+setup('authenticate', async ({ page }) => {
+  await page.goto('/login');
+  await page.getByLabel('Email').fill(process.env.TEST_USER_EMAIL!);
+  await page.getByLabel('Password').fill(process.env.TEST_USER_PASSWORD!);
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  
+  // Wait for authentication to complete
+  await expect(page.getByText('Dashboard')).toBeVisible();
+  
+  // Save authentication state
+  await page.context().storageState({ path: authFile });
+});
+```
+
+**Configuration:** `playwright.config.ts`
+```typescript
+export default defineConfig({
+  projects: [
+    { name: 'setup', testMatch: /.*\.setup\.ts/ },
+    {
+      name: 'chromium',
+      use: {
+        ...devices['Desktop Chrome'],
+        storageState: 'playwright/.auth/user.json',
+      },
+      dependencies: ['setup'],
+    },
+  ],
+});
+```
+
+**Security:** Add to `.gitignore`:
+```
+playwright/.auth/
+```
+
+**Source:** https://playwright.dev/docs/auth
+
+---
+
+## 6. Page Object Model
+
+Encapsulate page interactions in dedicated page object classes.
+
+**Structure:**
+```
+tests/
+├── e2e/
+│   ├── pages/
+│   │   ├── login.page.ts
+│   │   ├── dashboard.page.ts
+│   │   └── settings.page.ts
+│   ├── specs/
+│   │   ├── login.spec.ts
+│   │   └── dashboard.spec.ts
+│   └── auth.setup.ts
+```
+
+**Page Object example:**
+```typescript
+// pages/login.page.ts
+import { type Locator, type Page } from '@playwright/test';
+
+export class LoginPage {
+  readonly page: Page;
+  readonly emailInput: Locator;
+  readonly passwordInput: Locator;
+  readonly signInButton: Locator;
+  readonly errorMessage: Locator;
+
+  constructor(page: Page) {
+    this.page = page;
+    this.emailInput = page.getByLabel('Email');
+    this.passwordInput = page.getByLabel('Password');
+    this.signInButton = page.getByRole('button', { name: 'Sign in' });
+    this.errorMessage = page.getByRole('alert');
+  }
+
+  async goto() {
+    await this.page.goto('/login');
+  }
+
+  async login(email: string, password: string) {
+    await this.emailInput.fill(email);
+    await this.passwordInput.fill(password);
+    await this.signInButton.click();
+  }
+}
+```
+
+**Test using Page Object:**
+```typescript
+// specs/login.spec.ts
+import { test, expect } from '@playwright/test';
+import { LoginPage } from '../pages/login.page';
+
+test('shows error for invalid credentials', async ({ page }) => {
+  const loginPage = new LoginPage(page);
+  await loginPage.goto();
+  await loginPage.login('wrong@email.com', 'wrongpassword');
+  
+  await expect(loginPage.errorMessage).toBeVisible();
+  await expect(loginPage.errorMessage).toContainText('Invalid credentials');
+});
+```
+
+**Rules:**
+- Page objects contain ONLY locators and actions (no assertions)
+- Assertions belong in test files
+- One page object per page/component
+- No state stored in page objects
+
+**Source:** https://playwright.dev/docs/pom
+
+---
+
+## 7. Sharding for CI
+
+Split tests across multiple CI machines for faster execution.
+
+**Command line:**
+```bash
+# Split into 4 shards
+npx playwright test --shard=1/4
+npx playwright test --shard=2/4
+npx playwright test --shard=3/4
+npx playwright test --shard=4/4
+```
+
+**GitHub Actions example:**
+```yaml
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report-${{ matrix.shard }}
+          path: playwright-report/
+          retention-days: 7
+```
+
+**Merge reports:**
+```typescript
+// playwright.config.ts
+export default defineConfig({
+  reporter: process.env.CI ? 'blob' : 'html',
+});
+```
+
+```bash
+# After all shards complete
+npx playwright merge-reports --reporter html ./all-blob-reports
+```
+
+**Source:** https://playwright.dev/docs/test-sharding
+
+---
+
+## 8. Fully Parallel Mode
+
+Enable parallel execution at test level for optimal distribution.
+
+**Configuration:**
+```typescript
+// playwright.config.ts
+import { defineConfig } from '@playwright/test';
+
+export default defineConfig({
+  fullyParallel: true,
+  workers: process.env.CI ? 1 : undefined, // 1 worker in CI for stability
+});
+```
+
+**Per-file parallel mode:**
+```typescript
+import { test } from '@playwright/test';
+
+test.describe.configure({ mode: 'parallel' });
+
+test('test 1', async ({ page }) => { /* ... */ });
+test('test 2', async ({ page }) => { /* ... */ });
+test('test 3', async ({ page }) => { /* ... */ });
+```
+
+**Serial mode for dependent tests (use sparingly):**
+```typescript
+test.describe.configure({ mode: 'serial' });
+
+test('step 1', async ({ page }) => { /* ... */ });
+test('step 2', async ({ page }) => { /* ... */ }); // Runs after step 1
+```
+
+**Source:** https://playwright.dev/docs/test-parallel
+
+---
+
+## 9. Trace Viewer for Debugging
+
+Use traces instead of videos/screenshots for CI debugging.
+
+**Configuration:**
+```typescript
+// playwright.config.ts
+import { defineConfig } from '@playwright/test';
+
+export default defineConfig({
+  use: {
+    trace: 'on-first-retry', // Capture trace only on retry
+    screenshot: 'only-on-failure',
+    video: 'on-first-retry',
+  },
+  retries: process.env.CI ? 2 : 0,
+});
+```
+
+**View traces locally:**
+```bash
+npx playwright show-report
+# Click on failed test → Traces section
+```
+
+**Or open trace directly:**
+```bash
+npx playwright show-trace test-results/trace.zip
+```
+
+**Trace provides:**
+- Timeline of all actions
+- DOM snapshots for each step
+- Network requests
+- Console logs
+- Source code location
+
+**Source:** https://playwright.dev/docs/trace-viewer
+
+---
+
+## Quick Reference
+
+### Locator Cheat Sheet
+```typescript
+// Buttons
+page.getByRole('button', { name: 'Submit' })
+page.getByRole('button', { name: /submit/i }) // Case insensitive
+
+// Links
+page.getByRole('link', { name: 'Home' })
+
+// Form inputs
+page.getByLabel('Email')
+page.getByPlaceholder('Enter your email')
+
+// Text content
+page.getByText('Welcome back')
+page.getByText('Welcome', { exact: true })
+
+// Headings
+page.getByRole('heading', { name: 'Dashboard' })
+page.getByRole('heading', { level: 1 })
+
+// Lists
+page.getByRole('listitem').filter({ hasText: 'Item 1' })
+
+// Tables
+page.getByRole('row').filter({ hasText: 'John' })
+
+// Fallback only
+page.getByTestId('custom-element')
+```
+
+### Assertion Cheat Sheet
+```typescript
+await expect(locator).toBeVisible();
+await expect(locator).toBeHidden();
+await expect(locator).toBeEnabled();
+await expect(locator).toBeDisabled();
+await expect(locator).toHaveText('exact text');
+await expect(locator).toContainText('partial');
+await expect(locator).toHaveValue('input value');
+await expect(locator).toHaveAttribute('href', '/path');
+await expect(locator).toHaveCount(3);
+await expect(page).toHaveURL('/dashboard');
+await expect(page).toHaveTitle('Page Title');
+```
