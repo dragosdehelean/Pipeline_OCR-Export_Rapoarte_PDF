@@ -470,6 +470,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "docling" },
+    { name = "markupsafe" },
     { name = "pymupdf" },
     { name = "pymupdf-layout" },
     { name = "pymupdf4llm" },
@@ -485,6 +486,7 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "docling" },
+    { name = "markupsafe" },
     { name = "pymupdf" },
     { name = "pymupdf-layout" },
     { name = "pymupdf4llm" },

@@ -361,7 +361,7 @@ def test_preflight_allows_digital_pdf(tmp_path: Path, monkeypatch: pytest.Monkey
 
     monkeypatch.setattr(convert, "get_docling_converter", lambda settings: DummyConverter())
 
-    input_path = ROOT_DIR / "tests" / "fixtures" / "docs" / "short_valid_text.pdf"
+    input_path = ROOT_DIR / "tests" / "fixtures" / "docs" / "one_page_report.pdf"
     args = types.SimpleNamespace(
         input=str(input_path),
         doc_id="doc-digital",
@@ -427,7 +427,7 @@ def test_run_conversion_fails_max_pages(tmp_path: Path, monkeypatch: pytest.Monk
 
     monkeypatch.setattr(convert, "get_docling_converter", lambda settings: DummyConverter())
 
-    input_path = ROOT_DIR / "tests" / "fixtures" / "docs" / "short_valid_text.pdf"
+    input_path = ROOT_DIR / "tests" / "fixtures" / "docs" / "one_page_report.pdf"
     args = types.SimpleNamespace(
         input=str(input_path),
         doc_id="doc-max-pages",
@@ -472,6 +472,8 @@ def test_run_conversion_failure_without_docling(tmp_path: Path, monkeypatch: pyt
     assert meta_path.exists()
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
     assert meta["processing"]["status"] == "FAILED"
+    assert meta["processing"]["message"] == "docling missing"
+    assert meta["processing"]["failure"]["message"] == "docling missing"
     assert meta["logs"]["stderrTail"]
 
 

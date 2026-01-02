@@ -170,6 +170,11 @@ body {
   color: var(--accent-strong);
 }
 
+.button.danger {
+  background: var(--danger);
+  color: #ffffff;
+}
+
 .stats-grid {
   display: grid;
   gap: 12px;
@@ -269,6 +274,13 @@ body {
   gap: 12px;
 }
 
+.list-item-actions {
+  display: flex;
+  gap: 8px;
+  justify-self: end;
+  flex-wrap: wrap;
+}
+
 .doc-link {
   color: var(--accent-strong);
   text-decoration: none;
@@ -285,6 +297,15 @@ body {
   border: 1px solid var(--border);
   background: #ffffff;
   justify-self: end;
+}
+
+.ghost-link.danger {
+  color: var(--danger);
+  border-color: #f2b4b4;
+}
+
+.ghost-link.danger:hover {
+  background: #fff1f1;
 }
 
 .meta-row {
@@ -568,6 +589,16 @@ pre {
   flex-wrap: wrap;
 }
 
+.delete-control {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.delete-error {
+  color: var(--danger);
+}
+
 .log-grid {
   display: grid;
   gap: 16px;
@@ -589,6 +620,10 @@ pre {
   .list-item-top {
     grid-template-columns: 1fr;
     justify-items: start;
+  }
+
+  .list-item-actions {
+    justify-self: start;
   }
 
   .ghost-link {

@@ -7,7 +7,7 @@ import path from "node:path";
 import { vi } from "vitest";
 import { POST as upload } from "../../../app/api/docs/upload/route";
 import { GET as listDocs } from "../../../app/api/docs/route";
-import { GET as getMeta } from "../../../app/api/docs/[id]/route";
+import { DELETE as deleteDoc, GET as getMeta } from "../../../app/api/docs/[id]/route";
 import { GET as getHealth } from "../../../app/api/health/route";
 import type { PyMuPDFConfig } from "../../../app/_lib/config";
 import * as configModule from "../../../app/_lib/config";
@@ -19,7 +19,7 @@ const goodPdfPath = path.join(
   "tests",
   "fixtures",
   "docs",
-  "short_valid_text.pdf"
+  "one_page_report.pdf"
 );
 const badPdfPath = path.join(
   process.cwd(),
@@ -170,6 +170,44 @@ describe("docs api integration", () => {
     expect(meta.engine?.requested?.name).toBe("pymupdf4llm");
     expect(meta.engine?.effective?.name).toBe("pymupdf4llm");
     expect(meta.engine?.effective?.layoutActive).toBe(true);
+  });
+
+  it("deletes a document and removes stored files", async () => {
+    const formData = new FormData();
+    const file = await buildPdfFile(goodPdfPath, "delete.pdf");
+    formData.append("file", file);
+
+    const request = new Request("http://localhost/api/docs/upload", {
+      method: "POST",
+      body: formData
+    });
+
+    const response = await upload(request);
+    const payload = await response.json();
+    expect(response.status).toBe(202);
+    const meta = await waitForMeta(payload.id);
+    expect(meta.processing.status).toBe("SUCCESS");
+
+    const deleteResponse = await deleteDoc(
+      new Request(`http://localhost/api/docs/${payload.id}`, { method: "DELETE" }),
+      { params: Promise.resolve({ id: payload.id }) }
+    );
+    expect(deleteResponse.status).toBe(200);
+    const deletePayload = await deleteResponse.json();
+    expect(deletePayload).toMatchObject({
+      id: payload.id,
+      deleted: true,
+      removedIndex: true,
+      removedUpload: true,
+      removedExport: true
+    });
+
+    const listResponse = await listDocs();
+    const listPayload = await listResponse.json();
+    expect(
+      listPayload.docs.find((doc: { id: string }) => doc.id === payload.id)
+    ).toBeUndefined();
+
   });
 
   it("fails pymupdf4llm when layout deps are unavailable", async () => {

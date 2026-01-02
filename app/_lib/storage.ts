@@ -7,6 +7,13 @@ import path from "node:path";
 import { docsIndexSchema, metaFileSchema, type DocMeta, type DocsIndex, type MetaFile } from "./schema";
 
 export type DocIndexEntry = DocMeta;
+export type DeleteDocResult = {
+  id: string;
+  deleted: boolean;
+  removedIndex: boolean;
+  removedUpload: boolean;
+  removedExport: boolean;
+};
 
 /**
  * Resolves the root data directory from env or defaults.
@@ -119,6 +126,10 @@ export async function writeIndex(index: DocsIndex): Promise<void> {
  * Inserts or updates a document entry in the index.
  */
 export async function upsertIndexDoc(doc: DocIndexEntry): Promise<void> {
+  const exportDir = getDocExportDir(doc.id);
+  if (!(await pathExists(exportDir))) {
+    return;
+  }
   const index = await readIndex();
   const existingIndex = index.docs.findIndex((entry) => entry.id === doc.id);
   if (existingIndex >= 0) {
@@ -172,6 +183,29 @@ export async function readMetaFile(id: string): Promise<MetaFile> {
 }
 
 /**
+ * Deletes a document's artifacts and removes it from the index.
+ */
+export async function deleteDocArtifacts(id: string): Promise<DeleteDocResult> {
+  const exportDir = getDocExportDir(id);
+  const uploadPath = await readUploadPathFromMeta(id);
+  const uploadsDir = getUploadsDir();
+  const safeUploadPath = uploadPath && isWithinDir(uploadsDir, uploadPath) ? uploadPath : null;
+
+  const removedUpload = safeUploadPath ? await removePathWithRetry(safeUploadPath) : false;
+  const removedExport = await removePathWithRetry(exportDir);
+  const removedIndex = await removeIndexEntry(id);
+  const deleted = removedIndex || removedUpload || removedExport;
+
+  return {
+    id,
+    deleted,
+    removedIndex,
+    removedUpload,
+    removedExport
+  };
+}
+
+/**
  * Writes JSON atomically to avoid partial reads.
  */
 export async function writeJsonAtomic(filePath: string, value: unknown): Promise<void> {
@@ -185,6 +219,81 @@ export async function writeJsonAtomic(filePath: string, value: unknown): Promise
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+async function readUploadPathFromMeta(id: string): Promise<string | null> {
+  try {
+    const raw = await fs.readFile(getMetaPath(id), "utf-8");
+    const parsed = metaFileSchema.safeParse(JSON.parse(raw));
+    if (parsed.success) {
+      return parsed.data.source?.storedPath ?? null;
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
+  return null;
+}
+
+async function removeIndexEntry(id: string): Promise<boolean> {
+  const index = await readIndex();
+  const nextDocs = index.docs.filter((entry) => entry.id !== id);
+  if (nextDocs.length === index.docs.length) {
+    return false;
+  }
+  await writeIndex({ docs: nextDocs });
+  return true;
+}
+
+function isWithinDir(parentDir: string, candidatePath: string): boolean {
+  const relative = path.relative(parentDir, candidatePath);
+  return !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
+async function removePathWithRetry(targetPath: string): Promise<boolean> {
+  const exists = await pathExists(targetPath);
+  if (!exists) {
+    return false;
+  }
+  await rmWithRetry(targetPath, 4, 60);
+  return true;
+}
+
+async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await fs.access(targetPath);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function rmWithRetry(
+  targetPath: string,
+  attempts: number,
+  delayMs: number
+): Promise<void> {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      await fs.rm(targetPath, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (
+        attempt < attempts - 1 &&
+        (code === "EPERM" || code === "EACCES" || code === "EBUSY" || code === "ENOTEMPTY")
+      ) {
+        // WHY: Windows can transiently lock files during rapid writes.
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        continue;
+      }
+      throw error;
+    }
+  }
 }
 
 async function renameWithRetry(

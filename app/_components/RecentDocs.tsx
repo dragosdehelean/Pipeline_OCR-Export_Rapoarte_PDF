@@ -7,6 +7,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { StatusBadge } from "./StatusBadge";
+import DeleteDocButton from "./DeleteDocButton";
 import { docMetaSchema, type DocMeta, type DocStatus } from "../_lib/schema";
 
 type StatusFilter = "all" | DocStatus;
@@ -181,9 +182,17 @@ export default function RecentDocs({ initialDocs = [] }: { initialDocs?: DocMeta
                   <Link className="doc-link" href={`/docs/${doc.id}`}>
                     {doc.originalFileName}
                   </Link>
-                  <Link className="ghost-link" href={`/docs/${doc.id}`}>
-                    View details
-                  </Link>
+                  <div className="list-item-actions">
+                    <Link className="ghost-link" href={`/docs/${doc.id}`}>
+                      View details
+                    </Link>
+                    <DeleteDocButton
+                      docId={doc.id}
+                      label="Delete"
+                      className="ghost-link danger"
+                      ariaLabel={`Delete ${doc.originalFileName}`}
+                    />
+                  </div>
                 </div>
                 {failureSummary ? (
                   <div className="note">Reason: {failureSummary}</div>

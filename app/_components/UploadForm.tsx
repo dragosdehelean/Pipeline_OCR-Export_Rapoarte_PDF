@@ -60,8 +60,6 @@ type UploadError = {
   docId?: string;
 };
 
-type DeviceOverride = "auto" | "cpu" | "cuda";
-
 type ProcessingState = {
   id: string;
   name: string;
@@ -75,7 +73,6 @@ type UploadPayload = Record<string, unknown>;
 
 type UploadRequest = {
   file: File;
-  deviceOverride: DeviceOverride;
   profile: string | null;
   engine: EngineName;
 };
@@ -187,7 +184,6 @@ export default function UploadForm() {
   const [isDragActive, setIsDragActive] = useState(false);
   const [activeDoc, setActiveDoc] = useState<ProcessingState | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
-  const [deviceOverride, setDeviceOverride] = useState<DeviceOverride>("auto");
   const [profileOverride, setProfileOverride] = useState<string | null>(null);
   const [engine, setEngine] = useState<EngineName>("docling");
   const lastStatusRef = useRef<ProcessingState["status"] | null>(null);
@@ -302,7 +298,6 @@ export default function UploadForm() {
       // WHY: XMLHttpRequest exposes upload progress events; fetch does not.
       const formData = new FormData();
       formData.append("file", request.file);
-      formData.append("deviceOverride", request.deviceOverride);
       formData.append("engine", request.engine);
       if (request.profile) {
         formData.append("profile", request.profile);
@@ -439,7 +434,6 @@ export default function UploadForm() {
     try {
       await uploadMutation.mutateAsync({
         file,
-        deviceOverride,
         profile: resolvedProfile,
         engine: isPdf ? engine : "docling"
       });
@@ -541,7 +535,6 @@ export default function UploadForm() {
   const timeoutSec = health.config?.limits?.processTimeoutSec ?? null;
   const isDoclingEngine = engine === "docling";
   const showEngineSelector = isPdf || !selectedFile;
-  const canUseDoclingControls = isDoclingEngine;
   const canUpload =
     isReady &&
     !!selectedFile &&
@@ -732,24 +725,6 @@ export default function UploadForm() {
               ) : null}
             </div>
           ) : null}
-          <div>
-            <span className="label">Device:</span>{" "}
-            <select
-              id="device-override"
-              value={deviceOverride}
-              onChange={(event) =>
-                setDeviceOverride(event.target.value as DeviceOverride)
-              }
-              disabled={isUploading || !canUseDoclingControls}
-            >
-              <option value="auto">Auto</option>
-              <option value="cpu">CPU</option>
-              <option value="cuda">CUDA</option>
-            </select>
-            {!canUseDoclingControls ? (
-              <span className="note"> Docling-only (ignored by PyMuPDF).</span>
-            ) : null}
-          </div>
           {doclingProfiles.length ? (
             <div>
               <span className="label">Profile:</span>{" "}
@@ -757,7 +732,7 @@ export default function UploadForm() {
                 id="profile-override"
                 value={resolvedProfile ?? ""}
                 onChange={(event) => setProfileOverride(event.target.value)}
-                disabled={isUploading || !canUseDoclingControls}
+                disabled={isUploading || !isDoclingEngine}
               >
                 {doclingProfiles.map((profile) => (
                   <option key={profile} value={profile}>
@@ -765,7 +740,7 @@ export default function UploadForm() {
                   </option>
                 ))}
               </select>
-              {!canUseDoclingControls ? (
+              {!isDoclingEngine ? (
                 <span className="note"> Docling-only (ignored by PyMuPDF).</span>
               ) : null}
             </div>

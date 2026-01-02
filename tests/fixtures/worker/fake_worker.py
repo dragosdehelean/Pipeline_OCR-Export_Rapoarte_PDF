@@ -2,7 +2,6 @@
 import argparse
 import json
 import os
-import re
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
@@ -19,8 +18,8 @@ def now_iso():
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def load_docling_config(docling_path: str | None, gates_config: dict) -> dict:
-    """Loads docling config with a legacy fallback for tests."""
+def load_docling_config(docling_path: str | None, _gates_config: dict) -> dict:
+    """Loads docling config with a fallback for tests."""
     resolved_path = docling_path or os.getenv("DOCLING_CONFIG_PATH")
     if not resolved_path:
         resolved_path = os.path.join(os.getcwd(), "config", "docling.json")
@@ -28,28 +27,6 @@ def load_docling_config(docling_path: str | None, gates_config: dict) -> dict:
     if path.exists():
         with path.open("r", encoding="utf-8") as handle:
             return json.load(handle)
-    if "docling" in gates_config or "preflight" in gates_config:
-        docling_cfg = gates_config.get("docling", {})
-        profile = str(docling_cfg.get("profile", "digital-fast"))
-        return {
-            "version": 0,
-            "defaultProfile": profile,
-            "profiles": {
-                profile: {
-                    "pdfBackend": docling_cfg.get("pdfBackend", "dlparse_v2"),
-                    "doOcr": docling_cfg.get("doOcr", False),
-                    "doTableStructure": docling_cfg.get("doTableStructure", False),
-                    "tableStructureMode": docling_cfg.get("tableStructureMode", "fast"),
-                    "documentTimeoutSec": docling_cfg.get("documentTimeoutSec", 0),
-                }
-            },
-            "docling": {
-                "accelerator": {
-                    "defaultDevice": docling_cfg.get("accelerator", "auto")
-                }
-            },
-            "preflight": gates_config.get("preflight", {}),
-        }
     return {
         "version": 1,
         "defaultProfile": "digital-balanced",
@@ -223,7 +200,7 @@ def run_job(
             content_text = handle.read().decode("utf-8", errors="ignore").lower()
     except OSError:
         content_text = ""
-    has_text_ops = bool(re.search(r"\btj\b", content_text))
+    has_text_ops = "tj" in content_text
     is_bad = (
         "bad" in file_name
         or "scan" in file_name

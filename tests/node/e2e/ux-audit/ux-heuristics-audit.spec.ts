@@ -10,7 +10,7 @@ const goodPdf = path.join(
   "tests",
   "fixtures",
   "docs",
-  "short_valid_text.pdf"
+  "one_page_report.pdf"
 );
 const badPdf = path.join(
   process.cwd(),
@@ -157,11 +157,11 @@ test.describe("ux audit screenshots", () => {
     await stabilize(page);
 
     await uploadFile(page, goodPdf);
-    await expect(page.locator("a", { hasText: "short_valid_text.pdf" }).first()).toBeVisible();
+    await expect(page.locator("a", { hasText: "one_page_report.pdf" }).first()).toBeVisible();
     await capture(page, "home", "desktop", "success");
     await capture(page, "home", "mobile", "success");
 
-    await page.getByRole("link", { name: "short_valid_text.pdf" }).first().click();
+    await page.getByRole("link", { name: "one_page_report.pdf" }).first().click();
     await page.waitForURL(/\/docs\//);
     await capture(page, "doc-success", "desktop", "default");
     await capture(page, "doc-success", "mobile", "default");

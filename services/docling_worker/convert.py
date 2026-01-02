@@ -44,6 +44,19 @@ PYMUPDF4LLM_MARKDOWN_KEYS = {
 }
 
 
+DOCUMENT_MIME_TYPES: Dict[str, str] = {
+    ".pdf": "application/pdf",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+DEFAULT_DOCUMENT_MIME_TYPE = DOCUMENT_MIME_TYPES[".pdf"]
+
+
+def infer_document_mime_type(input_path: str) -> str:
+    """Infers the canonical mime type for supported document extensions."""
+    _, extension = os.path.splitext(input_path)
+    return DOCUMENT_MIME_TYPES.get(extension.lower(), DEFAULT_DOCUMENT_MIME_TYPE)
+
+
 class LayoutUnavailableError(RuntimeError):
     """Raised when PyMuPDF4LLM layout-only requirements are not met."""
 
@@ -593,7 +606,7 @@ def resolve_docling_settings(
     effective_cell_matching: Optional[bool] = requested_cell_value
     supported_fields = set(capabilities.get("tableStructureOptionsFields", []))
     if requested_cell_value is not None and supported_fields:
-        if "do_cell_matching" not in supported_fields:
+        if requested_cell_value is True and "do_cell_matching" not in supported_fields:
             effective_cell_matching = None
             fallback_reasons.append("DO_CELL_MATCHING_UNSUPPORTED")
 
@@ -923,6 +936,7 @@ def build_base_meta(
 ) -> Dict[str, Any]:
     """Builds the initial meta.json payload for a document."""
     size_bytes = os.path.getsize(input_path)
+    mime_type = infer_document_mime_type(input_path)
     accelerator = settings.accelerator
     docling_meta = {
         "pdfBackend": settings.pdf_backend,
@@ -962,7 +976,7 @@ def build_base_meta(
         "createdAt": now_iso(),
         "source": {
             "originalFileName": os.path.basename(input_path),
-            "mimeType": "",
+            "mimeType": mime_type,
             "sizeBytes": size_bytes,
             "sha256": sha256_file(input_path),
             "storedPath": input_path,
@@ -1308,7 +1322,9 @@ def run_pymupdf4llm_conversion(
         meta["processing"]["status"] = "FAILED"
         meta["processing"]["stage"] = "FAILED"
         meta["processing"]["exitCode"] = 1
-        error_message = str(exc)
+        error_message = str(exc).strip()
+        if not error_message:
+            error_message = "Processing failed."
         error_trace = traceback.format_exc()
         if isinstance(exc, LayoutUnavailableError):
             user_message = "PyMuPDF4LLM layout-only: layout unavailable"
@@ -1317,7 +1333,7 @@ def run_pymupdf4llm_conversion(
             user_message = error_message or "Invalid PyMuPDF4LLM config."
             failure_code = "PYMUPDF_CONFIG_INVALID"
         else:
-            user_message = "Processing failed."
+            user_message = error_message or "Processing failed."
             failure_code = "WORKER_EXCEPTION"
         meta["processing"]["message"] = user_message
         meta["processing"]["failure"] = {
@@ -1328,6 +1344,7 @@ def run_pymupdf4llm_conversion(
         meta["logs"]["stderrTail"] = clamp_tail(
             error_trace, config["limits"]["stderrTailKb"]
         )
+        print(error_message, file=sys.stderr, flush=True)
         emit_progress("FAILED", "Processing failed.", 100, job_id)
         record_processing_end(meta, start)
         write_json(meta_path, meta)
@@ -1507,11 +1524,19 @@ def run_conversion(
         meta["processing"]["status"] = "FAILED"
         meta["processing"]["stage"] = "FAILED"
         meta["processing"]["exitCode"] = 1
-        meta["processing"]["message"] = "Processing failed."
-        meta["processing"]["failure"] = {"code": "WORKER_EXCEPTION", "message": str(exc)}
+        error_message = str(exc).strip()
+        if not error_message:
+            error_message = "Processing failed."
+        meta["processing"]["message"] = error_message
+        meta["processing"]["failure"] = {
+            "code": "WORKER_EXCEPTION",
+            "message": error_message,
+            "details": error_message,
+        }
         meta["logs"]["stderrTail"] = clamp_tail(
-            str(exc), config["limits"]["stderrTailKb"]
+            error_message, config["limits"]["stderrTailKb"]
         )
+        print(error_message, file=sys.stderr, flush=True)
         emit_progress("FAILED", "Processing failed.", 100, job_id)
         record_processing_end(meta, start)
         write_json(meta_path, meta)

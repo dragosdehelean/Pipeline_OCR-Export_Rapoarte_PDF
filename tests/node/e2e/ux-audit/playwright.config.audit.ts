@@ -12,7 +12,7 @@ const gatesConfigPath =
   process.env.GATES_CONFIG_PATH || path.join(rootDir, "config", "quality-gates.json");
 const doclingWorker =
   process.env.DOCLING_WORKER ||
-  path.join(rootDir, "tests", "fixtures", "worker", "fake_worker.py");
+  path.join(rootDir, "services", "docling_worker", "convert.py");
 const pythonBin = process.env.PYTHON_BIN || "python";
 const auditPort = Number(process.env.UX_AUDIT_PORT || "3000");
 const externalBaseUrl = process.env.UX_AUDIT_BASE_URL;

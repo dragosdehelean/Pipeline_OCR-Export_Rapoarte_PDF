@@ -77,7 +77,6 @@ export async function POST(req: Request) {
   }
 
   const file = formData.get("file");
-  const deviceOverride = parseDeviceOverride(formData.get("deviceOverride"));
   const profileOverride = parseProfile(formData.get("profile"));
   const parsedEngine = parseEngine(formData.get("engine"));
   if (!isFileLike(file)) {
@@ -299,8 +298,7 @@ export async function POST(req: Request) {
     doclingConfigPath: getDoclingConfigPath(),
     pymupdfConfigPath: getPyMuPDFConfigPath(),
     engine,
-    deviceOverride,
-    profile: profileOverride,
+        profile: profileOverride,
     requestId,
     timeoutMs: timeoutSec * 1000,
     stdoutTailBytes: config.limits.stdoutTailKb * 1024,
@@ -681,17 +679,6 @@ function resolveExtension(extension: string, mimeType: string) {
     return ".docx";
   }
   return "";
-}
-
-function parseDeviceOverride(value: FormDataEntryValue | null) {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "auto" || normalized === "cpu" || normalized === "cuda") {
-    return normalized;
-  }
-  return null;
 }
 
 function parseProfile(value: FormDataEntryValue | null) {

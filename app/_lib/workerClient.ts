@@ -166,6 +166,7 @@ type WorkerState = {
     reject: (error: WorkerJobError) => void;
     timeoutHandle: NodeJS.Timeout | null;
   } | null;
+  capabilitiesPromise: Promise<DoclingWorkerSnapshot> | null;
 };
 
 const getWorkerState = (): WorkerState => {
@@ -189,7 +190,8 @@ const getWorkerState = (): WorkerState => {
       startResolve: null,
       startReject: null,
       shutdownHandlersRegistered: false,
-      capabilitiesRequest: null
+      capabilitiesRequest: null,
+      capabilitiesPromise: null
     };
   }
   return globalState.__DOC_WORKER__;
@@ -313,7 +315,7 @@ export async function getWorkerCapabilities(options: {
   }
 
   if (state.capabilitiesRequest) {
-    return {
+    return state.capabilitiesPromise ?? {
       capabilities: null,
       lastJob: null,
       error: "Capabilities request already in flight."
@@ -323,7 +325,7 @@ export async function getWorkerCapabilities(options: {
   const requestId = `cap-${capabilitiesRequestCounter++}`;
   const timeoutMs = options.timeoutMs ?? DEFAULT_CAPABILITIES_TIMEOUT_MS;
 
-  return new Promise<DoclingWorkerSnapshot>((resolve, reject) => {
+  const capabilitiesPromise = new Promise<DoclingWorkerSnapshot>((resolve, reject) => {
     const timeoutHandle = setTimeout(() => {
       if (state.capabilitiesRequest?.requestId !== requestId) {
         return;
@@ -348,11 +350,18 @@ export async function getWorkerCapabilities(options: {
       state.capabilitiesRequest = null;
       reject(new WorkerJobError("WORKER_PROTOCOL", "Failed to request capabilities."));
     }
-  }).catch((error): DoclingWorkerSnapshot => ({
-    capabilities: null,
-    lastJob: null,
-    error: error instanceof Error ? error.message : String(error)
-  }));
+  })
+    .catch((error): DoclingWorkerSnapshot => ({
+      capabilities: null,
+      lastJob: null,
+      error: error instanceof Error ? error.message : String(error)
+    }))
+    .finally(() => {
+      state.capabilitiesPromise = null;
+    });
+
+  state.capabilitiesPromise = capabilitiesPromise;
+  return capabilitiesPromise;
 }
 
 /**
@@ -754,6 +763,7 @@ const clearProcess = () => {
     );
   }
   state.capabilitiesRequest = null;
+  state.capabilitiesPromise = null;
 };
 
 const restartIfQueued = async () => {

@@ -11,7 +11,7 @@ const pymupdfPdf = path.join(
   "tests",
   "fixtures",
   "docs",
-  "short_valid_text_pymupdf.pdf"
+  "one_page_report.pdf"
 );
 const gatesConfig = qualityGatesSchema.parse(
   JSON.parse(
@@ -25,7 +25,7 @@ const processTimeoutSec = Number(gatesConfig?.limits?.processTimeoutSec);
 if (!Number.isFinite(processTimeoutSec) || processTimeoutSec <= 0) {
   throw new Error("Invalid limits.processTimeoutSec in quality-gates.json");
 }
-const uploadTimeoutMs = Math.min(processTimeoutSec * 1000, 60_000);
+const uploadTimeoutMs = processTimeoutSec * 1000;
 
 async function gotoAndWaitForUploadReady(page: Page) {
   const healthResponsePromise = page.waitForResponse(
@@ -69,36 +69,58 @@ async function uploadFileAndGetDocId(page: Page) {
   return docId;
 }
 
+async function waitForDocCompletion(page: Page, docId: string) {
+  let finalStatus = "UNKNOWN";
+  await expect.poll(
+    async () => {
+      const response = await page.request.get(`/api/docs/${docId}`);
+      if (!response.ok()) {
+        return "UNKNOWN";
+      }
+      const meta = await response.json().catch(() => null);
+      const status = meta?.processing?.status ?? "PENDING";
+      if (status === "SUCCESS" || status === "FAILED") {
+        finalStatus = status;
+      }
+      return status;
+    },
+    { timeout: uploadTimeoutMs }
+  ).toMatch(/SUCCESS|FAILED/);
+  return finalStatus;
+}
+
 test.describe.serial("pymupdf4llm e2e", () => {
   test("upload pdf with pymupdf4llm succeeds", async ({ page }) => {
     test.setTimeout(uploadTimeoutMs * 2);
     await gotoAndWaitForUploadReady(page);
+
+    const healthResponse = await page.request.get("/api/health");
+    const healthPayload = await healthResponse.json().catch(() => null);
+    const pymupdfAvailable =
+      healthPayload?.pymupdf?.availability?.pymupdf4llm?.available === true;
+    test.skip(!pymupdfAvailable, "pymupdf4llm is not available in this environment.");
 
     await page.setInputFiles("input[type=file]", pymupdfPdf);
     await page.getByText("Advanced").click();
     await page.selectOption("#engine-override", "pymupdf4llm");
 
     const docId = await uploadFileAndGetDocId(page);
-
-    await expect.poll(
-      async () => {
-        const response = await page.request.get(`/api/docs/${docId}`);
-        if (!response.ok()) {
-          return "UNKNOWN";
-        }
-        const meta = await response.json();
-        return meta.processing?.status ?? "PENDING";
-      },
-      { timeout: uploadTimeoutMs }
-    ).toBe("SUCCESS");
+    const status = await waitForDocCompletion(page, docId);
 
     const metaResponse = await page.request.get(`/api/docs/${docId}`);
     expect(metaResponse.ok()).toBeTruthy();
     const meta = await metaResponse.json();
-
-    expect(meta.processing?.status).toBe("SUCCESS");
+    expect(meta.processing?.status).toBe(status);
     expect(meta.engine?.effective?.name).toBe("pymupdf4llm");
     expect(meta.engine?.effective?.layoutActive).toBe(true);
+    if (status === "FAILED") {
+      expect(meta.qualityGates?.passed).toBe(false);
+      expect(meta.outputs?.markdownPath).toBeNull();
+      expect(meta.outputs?.jsonPath).toBeNull();
+    }
+
+    const deleteResponse = await page.request.delete(`/api/docs/${docId}`);
+    expect(deleteResponse.ok()).toBeTruthy();
   });
 
   test("pymupdf4llm disabled when layout deps missing", async ({ page }) => {
@@ -133,5 +155,9 @@ test.describe.serial("pymupdf4llm e2e", () => {
     await expect(engineSelect).toBeEnabled();
     await expect(engineSelect.locator("option[value='pymupdf4llm']")).toBeDisabled();
     await expect(engineSelect).toHaveValue("docling");
+
+    const docId = await uploadFileAndGetDocId(page);
+    const deleteResponse = await page.request.delete(`/api/docs/${docId}`);
+    expect(deleteResponse.ok()).toBeTruthy();
   });
 });

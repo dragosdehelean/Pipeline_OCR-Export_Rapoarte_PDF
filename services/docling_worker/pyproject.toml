@@ -13,6 +13,7 @@ dependencies = [
   "pymupdf4llm",
   "pymupdf-layout",
   "reportlab",
+  "markupsafe",
 ]
 
 [dependency-groups]

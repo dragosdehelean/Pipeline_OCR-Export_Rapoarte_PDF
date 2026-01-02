@@ -153,7 +153,7 @@ tests/
       test-results/        Playwright output (gitignored)
   python/
   fixtures/
-    docs/                 PDF fixtures + generators (e.g. generate_big_pdf.py)
+    docs/                 PDF fixtures
 data/                     Runtime uploads/exports (gitignored)
 tests/node/e2e/data-test/  E2E data dir (gitignored)
 ```

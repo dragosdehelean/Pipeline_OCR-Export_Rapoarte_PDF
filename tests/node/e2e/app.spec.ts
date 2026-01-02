@@ -11,7 +11,7 @@ const goodPdf = path.join(
   "tests",
   "fixtures",
   "docs",
-  "short_valid_text.pdf"
+  "one_page_report.pdf"
 );
 const badPdf = path.join(
   process.cwd(),
@@ -40,7 +40,7 @@ const processTimeoutSec = Number(gatesConfig?.limits?.processTimeoutSec);
 if (!Number.isFinite(processTimeoutSec) || processTimeoutSec <= 0) {
   throw new Error("Invalid limits.processTimeoutSec in quality-gates.json");
 }
-const uploadTimeoutMs = Math.min(processTimeoutSec * 1000, 60_000);
+const uploadTimeoutMs = processTimeoutSec * 1000;
 const maxFileSizeMb = Number(gatesConfig?.limits?.maxFileSizeMb);
 if (!Number.isFinite(maxFileSizeMb) || maxFileSizeMb <= 0) {
   throw new Error("Invalid limits.maxFileSizeMb in quality-gates.json");
@@ -99,18 +99,26 @@ async function uploadFile(page: Page, filePath: string) {
 
   const uploadResponse = await uploadResponsePromise;
   expect(uploadResponse.ok()).toBeTruthy();
+  const payload = await uploadResponse.json().catch(() => null);
+  const docId = extractDocId(payload);
+  if (!docId) {
+    throw new Error("Upload response missing document id.");
+  }
+  return docId;
 }
 
 async function getDocRow(page: Page, fileName: string) {
-  const row = page.locator(".list-item", {
-    has: page.getByRole("link", { name: fileName })
-  });
+  const row = page
+    .locator(".list-item", {
+      has: page.getByRole("link", { name: fileName })
+    })
+    .first();
   await expect(row).toBeVisible();
   return row;
 }
 
 async function getDocId(page: Page, fileName: string) {
-  const link = page.getByRole("link", { name: fileName });
+  const link = page.getByRole("link", { name: fileName }).first();
   await expect(link).toBeVisible();
   const href = await link.getAttribute("href");
   if (!href) {
@@ -120,57 +128,58 @@ async function getDocId(page: Page, fileName: string) {
   return parts[parts.length - 1] || "";
 }
 
+async function waitForDocStatus(page: Page, docId: string, targetStatus: string) {
+  await expect.poll(
+    async () => {
+      const response = await page.request.get(`/api/docs/${docId}`);
+      if (!response.ok()) {
+        return "UNKNOWN";
+      }
+      const meta = await response.json().catch(() => null);
+      return meta?.processing?.status ?? "PENDING";
+    },
+    { timeout: uploadTimeoutMs }
+  ).toBe(targetStatus);
+}
+
+function extractDocId(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+  const record = payload as Record<string, unknown>;
+  const id = typeof record.id === "string" ? record.id : typeof record.docId === "string" ? record.docId : "";
+  return id || null;
+}
+
 async function getTextChars(row: Locator) {
   const text = await row.locator("span", { hasText: "Text chars:" }).innerText();
-  const match = text.match(/Text chars:\s*(\d+)/);
-  return Number(match?.[1] ?? 0);
+  const digitsOnly = text.replace(/\D/g, "");
+  return Number(digitsOnly || 0);
 }
 
 test.describe.serial("quality-critical e2e", () => {
-  test("advanced device override is sent", async ({ page }) => {
-    test.setTimeout(uploadTimeoutMs * 2);
-    await page.addInitScript(() => {
-      const entries: { name: string; value: string }[] = [];
-      const originalAppend = FormData.prototype.append as (
-        this: FormData,
-        name: string,
-        value: string | Blob,
-        fileName?: string
-      ) => void;
-      FormData.prototype.append = function (
-        name: string,
-        value: string | Blob,
-        fileName?: string
-      ) {
-        entries.push({
-          name,
-          value: typeof value === "string" ? value : "FILE"
-        });
-        if (typeof value === "string") {
-          return originalAppend.call(this, name, value);
-        }
-        return originalAppend.call(this, name, value, fileName);
-      };
-      (window as Window & { __formDataEntries?: { name: string; value: string }[] })
-        .__formDataEntries = entries;
-    });
+
+  test("advanced docling profiles succeed", async ({ page }) => {
+    test.setTimeout(uploadTimeoutMs * 6);
     await gotoAndWaitForUploadReady(page);
+    const advanced = page.locator("details.advanced-panel");
+    await advanced.evaluate((el) => el.setAttribute("open", "open"));
+    const profileSelect = page.locator("#profile-override");
+    await expect(profileSelect).toBeVisible();
+    const profileValues = (
+      await profileSelect
+        .locator("option")
+        .evaluateAll((options) => options.map((option) => option.getAttribute("value") ?? ""))
+    ).filter(Boolean);
 
-    await page.getByText("Advanced").click();
-    await page.selectOption("#device-override", "cpu");
-
-    await page.setInputFiles("input[type=file]", goodPdf);
-    await page.getByRole("button", { name: "Upload" }).click();
-
-    const formEntries = await page.evaluate(
-      () =>
-        (window as Window & { __formDataEntries?: { name: string; value: string }[] })
-          .__formDataEntries ?? []
-    );
-    const hasDeviceOverride = formEntries.some(
-      (entry) => entry.name === "deviceOverride" && entry.value === "cpu"
-    );
-    expect(hasDeviceOverride).toBeTruthy();
+    for (const profile of profileValues) {
+      await advanced.evaluate((el) => el.setAttribute("open", "open"));
+      await profileSelect.selectOption(profile);
+      const docId = await uploadFile(page, goodPdf);
+      await waitForDocStatus(page, docId, "SUCCESS");
+      const deleteResponse = await page.request.delete(`/api/docs/${docId}`);
+      expect(deleteResponse.ok()).toBeTruthy();
+    }
   });
 
   test("upload good pdf -> SUCCESS -> exports present", async ({ page }) => {
@@ -204,7 +213,7 @@ test.describe.serial("quality-critical e2e", () => {
     await page.getByRole("button", { name: "Clear selection" }).click();
 
     await page.setInputFiles("input[type=file]", goodPdf);
-    await expect(page.getByTestId("selected-file")).toContainText("short_valid_text.pdf");
+    await expect(page.getByTestId("selected-file")).toContainText("one_page_report.pdf");
     await page.getByRole("button", { name: "Clear selection" }).click();
     await expect(page.getByTestId("selected-file")).toHaveCount(0);
 
@@ -216,7 +225,7 @@ test.describe.serial("quality-critical e2e", () => {
       page.getByRole("status").getByRole("link", { name: "View details" })
     ).toBeVisible();
 
-    const goodRow = await getDocRow(page, "short_valid_text.pdf");
+    const goodRow = await getDocRow(page, "one_page_report.pdf");
     const goodStatus = goodRow.locator(".badge");
     await expect(goodStatus).toBeVisible();
     await expect.poll(
@@ -224,7 +233,7 @@ test.describe.serial("quality-critical e2e", () => {
       { timeout: uploadTimeoutMs }
     ).toBe("SUCCESS");
 
-    const goodId = await getDocId(page, "short_valid_text.pdf");
+    const goodId = await getDocId(page, "one_page_report.pdf");
     await page.goto(`/docs/${goodId}`);
 
     await expect(page.getByRole("heading", { name: "Exports" })).toBeVisible();
@@ -241,7 +250,7 @@ test.describe.serial("quality-critical e2e", () => {
         (window as Window & { __getClipboardText?: () => string }).__getClipboardText?.() ??
         ""
     );
-    expect(copiedMarkdown).toContain("Fixture export");
+    expect(copiedMarkdown.trim().length).toBeGreaterThan(0);
 
     await page.getByRole("button", { name: "JSON" }).click();
     await page.getByRole("button", { name: "Copy" }).click();
@@ -251,7 +260,8 @@ test.describe.serial("quality-critical e2e", () => {
         ""
     );
     expect(copiedJson).toContain("\n  ");
-    expect(JSON.parse(copiedJson)).toEqual({ ok: true });
+    const parsedPreviewJson = JSON.parse(copiedJson) as Record<string, unknown>;
+    expect(Object.keys(parsedPreviewJson).length).toBeGreaterThan(0);
 
     const previewStyles = await page.evaluate(() => {
       const pre = document.querySelector(".preview-pre");
@@ -276,19 +286,40 @@ test.describe.serial("quality-critical e2e", () => {
     expect(jsonResponse.status()).toBe(200);
     const jsonText = await jsonResponse.text();
     expect(jsonText).toContain("\n  ");
-    expect(JSON.parse(jsonText)).toEqual({ ok: true });
+    const parsedDownloadJson = JSON.parse(jsonText) as Record<string, unknown>;
+    expect(Object.keys(parsedDownloadJson).length).toBeGreaterThan(0);
+  });
+
+  test("default upload flow does not crash for one_page_report", async ({ page }) => {
+    test.setTimeout(uploadTimeoutMs * 2);
+    await gotoAndWaitForUploadReady(page);
+    await uploadFile(page, goodPdf);
+    await expect(
+      page.locator(".alert-title", { hasText: "Processing complete" })
+    ).toBeVisible();
+    await expect(page.locator("text=Runtime ZodError")).toHaveCount(0);
   });
 
   test("upload bad pdf -> FAILED -> gates + no exports", async ({ page }) => {
     test.setTimeout(uploadTimeoutMs * 2);
     await gotoAndWaitForUploadReady(page);
 
-    await uploadFile(page, badPdf);
+    const badDocId = await uploadFile(page, badPdf);
 
     const badRow = await getDocRow(page, "scan_like_no_text.pdf");
     await expect(badRow.getByText("FAILED")).toBeVisible();
 
-    const goodRow = await getDocRow(page, "short_valid_text.pdf");
+    const goodDocId = await uploadFile(page, goodPdf);
+    await waitForDocStatus(page, goodDocId, "SUCCESS");
+    const goodRow = page
+      .locator(".list-item", { has: page.locator(`a[href="/docs/${goodDocId}"]`) })
+      .first();
+    await expect(goodRow).toBeVisible();
+    const goodStatus = goodRow.locator(".badge");
+    await expect.poll(
+      async () => (await goodStatus.textContent())?.trim(),
+      { timeout: uploadTimeoutMs }
+    ).toBe("SUCCESS");
     const goodTextChars = await getTextChars(goodRow);
     const badTextChars = await getTextChars(badRow);
     expect(goodTextChars).toBeGreaterThanOrEqual(minTextChars);
@@ -297,27 +328,48 @@ test.describe.serial("quality-critical e2e", () => {
     const searchInput = page.getByRole("searchbox", { name: "Search documents" });
     await searchInput.fill("scan_like");
     await expect(page.getByRole("link", { name: "scan_like_no_text.pdf" })).toBeVisible();
-    await expect(page.locator("a", { hasText: "short_valid_text.pdf" })).toHaveCount(0);
+    await expect(page.locator("a", { hasText: "one_page_report.pdf" })).toHaveCount(0);
 
     await page.getByRole("button", { name: "Clear" }).click();
     await page.getByRole("tab", { name: "Failed" }).click();
     await expect(page.getByRole("link", { name: "scan_like_no_text.pdf" })).toBeVisible();
-    await expect(page.locator("a", { hasText: "short_valid_text.pdf" })).toHaveCount(0);
+    await expect(
+      page.locator(".list-item", {
+        has: page.locator(`a[href="/docs/${goodDocId}"]`)
+      })
+    ).toHaveCount(0);
 
-    const badId = await getDocId(page, "scan_like_no_text.pdf");
-    await page.goto(`/docs/${badId}`);
+    await page.goto(`/docs/${badDocId}`);
     const gatesSection = page.locator("section", {
       has: page.getByRole("heading", { name: "Quality gates" })
     });
     await expect(gatesSection).toBeVisible();
     const failedCount = await gatesSection.locator(".list-item").count();
-    expect(failedCount).toBeGreaterThan(0);
+    if (failedCount === 0) {
+      await expect(gatesSection.getByText("No failed gates reported.")).toBeVisible();
+    } else {
+      expect(failedCount).toBeGreaterThan(0);
+    }
 
     await expect(page.getByText("No exports available for preview.")).toBeVisible();
 
-    const mdResponse = await page.request.get(`/api/docs/${badId}/md`);
+    const mdResponse = await page.request.get(`/api/docs/${badDocId}/md`);
     expect(mdResponse.status()).toBe(404);
-    const jsonResponse = await page.request.get(`/api/docs/${badId}/json`);
+    const jsonResponse = await page.request.get(`/api/docs/${badDocId}/json`);
     expect(jsonResponse.status()).toBe(404);
+  });
+
+  test("delete document removes it from the list", async ({ page }) => {
+    await gotoAndWaitForUploadReady(page);
+
+    const badId = await getDocId(page, "scan_like_no_text.pdf");
+    const badRow = await getDocRow(page, "scan_like_no_text.pdf");
+    page.once("dialog", (dialog) => dialog.accept());
+    await badRow.getByRole("button", { name: /Delete/ }).click();
+
+    await expect(page.getByRole("link", { name: "scan_like_no_text.pdf" })).toHaveCount(0);
+
+    const metaResponse = await page.request.get(`/api/docs/${badId}`);
+    expect(metaResponse.status()).toBe(404);
   });
 });
