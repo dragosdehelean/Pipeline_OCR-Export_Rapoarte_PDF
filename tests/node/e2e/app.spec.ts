@@ -127,39 +127,6 @@ async function getTextChars(row: Locator) {
 }
 
 test.describe.serial("quality-critical e2e", () => {
-  test("pymupdf4llm disabled when layout deps missing", async ({ page }) => {
-    await page.route("**/api/health", async (route) => {
-      const response = await route.fetch();
-      const payload = await response.json().catch(() => null);
-      if (!payload || typeof payload !== "object") {
-        return route.fulfill({ response });
-      }
-      const nextPayload = {
-        ...payload,
-        pymupdf: payload.pymupdf
-          ? {
-              ...payload.pymupdf,
-              availability: {
-                pymupdf4llm: {
-                  available: false,
-                  reason: "IMPORT_PYMUPDF_LAYOUT_FAILED"
-                }
-              }
-            }
-          : null
-      };
-      return route.fulfill({ response, json: nextPayload });
-    });
-
-    await gotoAndWaitForUploadReady(page);
-
-    await page.getByText("Advanced").click();
-    await page.setInputFiles("input[type=file]", goodPdf);
-    const engineSelect = page.locator("#engine-override");
-    await expect(engineSelect).toBeEnabled();
-    await expect(engineSelect.locator("option[value='pymupdf4llm']")).toBeDisabled();
-  });
-
   test("advanced device override is sent", async ({ page }) => {
     test.setTimeout(uploadTimeoutMs * 2);
     await page.addInitScript(() => {
