@@ -149,7 +149,12 @@ tests/
     unit/
     integration/
     e2e/
-      ux-audit/            UX audit config/specs/output + ux diff script
+      config/              E2E constants and parsed gates config
+      helpers/             Shared E2E helpers
+      pages/               Page objects for E2E locators
+      specs/               Playwright specs by feature
+        ux-audit/          UX audit spec (optional)
+      ux-audit/            UX audit config/output + ux diff script
       test-results/        Playwright output (gitignored)
   python/
   fixtures/

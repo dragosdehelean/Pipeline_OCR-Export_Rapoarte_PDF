@@ -187,136 +187,7 @@ playwright/.auth/
 
 ---
 
-## 6. Page Object Model
-
-Encapsulate page interactions in dedicated page object classes.
-
-**Structure:**
-```
-tests/
-├── e2e/
-│   ├── pages/
-│   │   ├── login.page.ts
-│   │   ├── dashboard.page.ts
-│   │   └── settings.page.ts
-│   ├── specs/
-│   │   ├── login.spec.ts
-│   │   └── dashboard.spec.ts
-│   └── auth.setup.ts
-```
-
-**Page Object example:**
-```typescript
-// pages/login.page.ts
-import { type Locator, type Page } from '@playwright/test';
-
-export class LoginPage {
-  readonly page: Page;
-  readonly emailInput: Locator;
-  readonly passwordInput: Locator;
-  readonly signInButton: Locator;
-  readonly errorMessage: Locator;
-
-  constructor(page: Page) {
-    this.page = page;
-    this.emailInput = page.getByLabel('Email');
-    this.passwordInput = page.getByLabel('Password');
-    this.signInButton = page.getByRole('button', { name: 'Sign in' });
-    this.errorMessage = page.getByRole('alert');
-  }
-
-  async goto() {
-    await this.page.goto('/login');
-  }
-
-  async login(email: string, password: string) {
-    await this.emailInput.fill(email);
-    await this.passwordInput.fill(password);
-    await this.signInButton.click();
-  }
-}
-```
-
-**Test using Page Object:**
-```typescript
-// specs/login.spec.ts
-import { test, expect } from '@playwright/test';
-import { LoginPage } from '../pages/login.page';
-
-test('shows error for invalid credentials', async ({ page }) => {
-  const loginPage = new LoginPage(page);
-  await loginPage.goto();
-  await loginPage.login('wrong@email.com', 'wrongpassword');
-  
-  await expect(loginPage.errorMessage).toBeVisible();
-  await expect(loginPage.errorMessage).toContainText('Invalid credentials');
-});
-```
-
-**Rules:**
-- Page objects contain ONLY locators and actions (no assertions)
-- Assertions belong in test files
-- One page object per page/component
-- No state stored in page objects
-
-**Source:** https://playwright.dev/docs/pom
-
----
-
-## 7. Sharding for CI
-
-Split tests across multiple CI machines for faster execution.
-
-**Command line:**
-```bash
-# Split into 4 shards
-npx playwright test --shard=1/4
-npx playwright test --shard=2/4
-npx playwright test --shard=3/4
-npx playwright test --shard=4/4
-```
-
-**GitHub Actions example:**
-```yaml
-jobs:
-  test:
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium
-      - run: npx playwright test --shard=${{ matrix.shard }}/${{ strategy.job-total }}
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: playwright-report-${{ matrix.shard }}
-          path: playwright-report/
-          retention-days: 7
-```
-
-**Merge reports:**
-```typescript
-// playwright.config.ts
-export default defineConfig({
-  reporter: process.env.CI ? 'blob' : 'html',
-});
-```
-
-```bash
-# After all shards complete
-npx playwright merge-reports --reporter html ./all-blob-reports
-```
-
-**Source:** https://playwright.dev/docs/test-sharding
-
----
-
-## 8. Fully Parallel Mode
+## 6. Fully Parallel Mode
 
 Enable parallel execution at test level for optimal distribution.
 
@@ -354,7 +225,7 @@ test('step 2', async ({ page }) => { /* ... */ }); // Runs after step 1
 
 ---
 
-## 9. Trace Viewer for Debugging
+## 7. Trace Viewer for Debugging
 
 Use traces instead of videos/screenshots for CI debugging.
 
@@ -392,6 +263,155 @@ npx playwright show-trace test-results/trace.zip
 - Source code location
 
 **Source:** https://playwright.dev/docs/trace-viewer
+
+---
+
+## 8. Code Organization (DRY)
+
+NEVER duplicate code across spec files. Extract shared logic.
+
+**Required structure for this project:**
+```
+tests/node/e2e/
+├── config/
+│   └── test-config.ts      # MANDATORY: All constants, timeouts, fixture paths
+├── helpers/
+│   └── *.helper.ts         # MANDATORY: Shared functions (upload, wait, etc.)
+├── pages/                   # MANDATORY when >3 spec files exist
+│   └── *.page.ts
+└── specs/
+    └── <feature>/
+        └── *.spec.ts
+```
+
+**Rules:**
+- If a function appears in 2+ spec files → MUST move to `helpers/`
+- If a constant appears in 2+ spec files → MUST move to `config/test-config.ts`
+- Spec files should contain ONLY test definitions and minimal setup
+
+```typescript
+// ❌ Forbidden - duplicated in multiple files
+const goodPdf = path.join(process.cwd(), "tests", "fixtures", "docs", "one_page_report.pdf");
+
+// ✅ Correct - imported from central config
+import { FIXTURES } from '../config/test-config';
+await page.setInputFiles("input[type=file]", FIXTURES.goodPdf);
+```
+
+---
+
+## 9. Test Documentation 
+
+Every spec file and complex test MUST be documented.
+
+**Spec file header (MANDATORY):**
+```typescript
+/**
+ * @fileoverview [CE testează acest fișier - în termeni de business/user]
+ * 
+ * Coverage: [ce funcționalitate/pagină acoperă]
+ * Dependencies: [ce trebuie să ruleze înainte - ex: server, worker]
+ * Run time: [aproximativ - ex: ~2 min, ~30 sec]
+ */
+```
+
+**Complex test documentation (MANDATORY pentru teste >20 linii):**
+```typescript
+/**
+ * [Ce verifică testul în termeni de user behavior]
+ * 
+ * WHY: [De ce e important acest test - business value]
+ * Pre-conditions: [Ce trebuie să existe înainte]
+ */
+test('descriptive name here', async ({ page }) => {
+  // WHY: [pentru orice setup non-evident]
+  await page.addInitScript(() => { /* ... */ });
+});
+```
+
+**Inline comments (MANDATORY pentru):**
+- Mock-uri și interceptări de rețea
+- Timeout-uri custom
+- Workarounds pentru bug-uri cunoscute
+- Aserții non-evidente
+
+---
+
+## 10. Test Naming and File Organization ← ADAUGĂ SECȚIUNE NOUĂ
+
+**File naming convention:**
+```
+<feature>-<scenario>.spec.ts
+
+Examples:
+✅ upload-success.spec.ts
+✅ upload-validation.spec.ts  
+✅ export-markdown.spec.ts
+❌ standard.spec.ts (ce e "standard"?)
+❌ comprehensive.spec.ts (nu descrie CE testează)
+```
+
+**Test naming convention:**
+```typescript
+// Pattern: [action] [object] [expected result]
+✅ test('upload valid PDF creates document with SUCCESS status')
+✅ test('upload unsupported file shows validation error')
+❌ test('test 1')
+❌ test('full upload flow with UI validation') // prea generic
+```
+
+**Folder organization by feature:**
+```
+specs/
+├── upload/           # Toate testele legate de upload
+├── export/           # Toate testele legate de export
+├── processing/       # Toate testele legate de procesare
+└── smoke/            # Health checks rapide
+```
+
+---
+
+## 11. Slow Tests Handling ← ADAUGĂ SECȚIUNE NOUĂ
+
+Tests that take >60 seconds MUST be marked and documented.
+
+**Marking slow tests:**
+```typescript
+test('processes all docling profiles', async ({ page }) => {
+  test.slow(); // MANDATORY pentru teste >60s
+  // ...
+});
+```
+
+**Running without slow tests:**
+```bash
+npx playwright test --grep-invert @slow
+```
+
+**Documentation for slow tests (MANDATORY):**
+```typescript
+/**
+ * @slow ~5 minutes
+ * WHY SLOW: Iterează prin toate profilele docling cu procesare reală
+ * WHEN TO RUN: Nightly builds, pre-release validation
+ */
+```
+
+---
+
+## 12. Enforcement
+
+**These rules are MANDATORY, not suggestions.**
+
+Before merging any PR with E2E tests, verify:
+- [ ] No duplicated helpers across spec files
+- [ ] All spec files have @fileoverview
+- [ ] All tests >20 lines have documentation
+- [ ] No CSS class or ID selectors (use getByRole, getByLabel, etc.)
+- [ ] Slow tests are marked with test.slow() or @slow tag
+- [ ] File names follow `<feature>-<scenario>.spec.ts` pattern
+
+**Violations will be flagged in code review.**
 
 ---
 

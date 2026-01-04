@@ -37,14 +37,17 @@ process.env.PYTHON_BIN = pythonBin;
 
 export default defineConfig({
   testDir: "./tests/node/e2e",
-  testIgnore: ["**/ux-heuristics-audit.spec.ts"],
+  testIgnore: ["**/specs/ux-audit/**"],
   outputDir: "./tests/node/e2e/test-results",
   timeout: 60_000,
-  workers: process.env.CI ? 2 : 3,
-  fullyParallel: false,
+  workers: process.env.CI ? 1 : undefined,
+  fullyParallel: true,
+  retries: process.env.CI ? 2 : 0,
   use: {
     baseURL,
-    trace: "retain-on-failure"
+    trace: "on-first-retry",
+    screenshot: "only-on-failure",
+    video: "on-first-retry"
   },
   webServer: externalBaseUrl
     ? undefined

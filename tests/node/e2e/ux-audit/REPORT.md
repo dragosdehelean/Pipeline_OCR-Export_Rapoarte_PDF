@@ -4,7 +4,7 @@
 Methodology reference: Jakob Nielsen / NN/g "10 Usability Heuristics for User Interface Design"
 https://www.nngroup.com/articles/ten-usability-heuristics/
 
-This report uses screenshots captured by `playwright/tests/ux-heuristics-audit.spec.ts`.
+This report uses screenshots captured by `tests/node/e2e/specs/ux-audit/ux-heuristics-audit.spec.ts`.
 
 ## 1) Visibility of System Status
 

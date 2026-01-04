@@ -596,6 +596,7 @@ export default function UploadForm() {
     <form
       className={`upload-zone ${isDragActive ? "drag-active" : ""}`}
       onSubmit={onSubmit}
+      aria-label="Upload form"
     >
       {!health.loading && !health.ok ? (
         <div className="alert error" role="alert">
@@ -726,6 +727,7 @@ export default function UploadForm() {
               <span className="label">Engine:</span>{" "}
               <select
                 id="engine-override"
+                aria-label="Engine"
                 value={engine}
                 onChange={(event) => setEngine(event.target.value as EngineName)}
                 disabled={isUploading || !isPdf}
@@ -761,6 +763,7 @@ export default function UploadForm() {
               <span className="label">Profile:</span>{" "}
               <select
                 id="profile-override"
+                aria-label="Profile"
                 value={resolvedProfile ?? ""}
                 onChange={(event) => setProfileOverride(event.target.value)}
                 disabled={isUploading || !isDoclingEngine}
