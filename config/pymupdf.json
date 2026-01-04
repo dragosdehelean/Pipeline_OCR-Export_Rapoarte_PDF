@@ -5,17 +5,21 @@
   "pymupdf4llm": {
     "requireLayout": true,
     "toMarkdown": {
-      "write_images": false,
-      "embed_images": false,
       "dpi": 150,
       "page_chunks": true,
       "extract_words": true,
+
       "force_text": true,
+      "ignore_code": true,
       "show_progress": false,
+
+      "write_images": false,
+      "embed_images": false,
+
+
       "margins": 0,
-      "table_strategy": "lines_strict",
-      "graphics_limit": 0,
-      "ignore_code": false
+      "table_strategy": "",
+      "graphics_limit": 0
     }
   }
 }

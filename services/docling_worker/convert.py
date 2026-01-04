@@ -1257,29 +1257,89 @@ def run_pymupdf4llm_conversion(
         total_pages = doc.page_count
         try:
             to_json_fn = getattr(pymupdf4llm, "to_json", None)
-            for index in range(total_pages):
-                progress = 15 + int(((index + 1) / max(total_pages, 1)) * 55)
-                emit_progress(
-                    "EXTRACT_PYMUPDF4LLM",
-                    f"Page {index + 1}/{total_pages}",
-                    progress,
-                    job_id,
-                )
-                md_result = pymupdf4llm.to_markdown(
-                    doc, pages=[index], **to_markdown_config
-                )
-                markdown, chunks = normalize_pymupdf4llm_result(md_result)
-                markdown_pages.append(markdown)
-                pages_text.append(markdown)
-                if chunks is not None:
-                    page_chunks.append(chunks)
+            # PREVIOUS IMPLEMENTATION (optimized for page_chunks=True):
+            # for index in range(total_pages):
+            #     progress = 15 + int(((index + 1) / max(total_pages, 1)) * 55)
+            #     emit_progress(
+            #         "EXTRACT_PYMUPDF4LLM",
+            #         f"Page {index + 1}/{total_pages}",
+            #         progress,
+            #         job_id,
+            #     )
+            #     md_result = pymupdf4llm.to_markdown(
+            #         doc, pages=[index], **to_markdown_config
+            #     )
+            #     markdown, chunks = normalize_pymupdf4llm_result(md_result)
+            #     markdown_pages.append(markdown)
+            #     pages_text.append(markdown)
+            #     if chunks is not None:
+            #         page_chunks.append(chunks)
 
-                if callable(to_json_fn):
-                    try:
-                        json_pages.append(to_json_fn(doc, pages=[index]))
-                    except Exception:
-                        json_pages = []
-                        to_json_fn = None
+            # NEW IMPLEMENTATION (works with page_chunks=False - single pass for all pages):
+            emit_progress(
+                "EXTRACT_PYMUPDF4LLM",
+                f"Extracting all {total_pages} pages",
+                15,
+                job_id,
+            )
+            md_result = pymupdf4llm.to_markdown(doc, **to_markdown_config)
+            markdown, chunks = normalize_pymupdf4llm_result(md_result)
+
+            # When page_chunks=False, we get a single markdown string for all pages
+            # Split by page separator to get individual pages for metrics
+            if isinstance(md_result, str):
+                # pymupdf4llm separates pages with "-----" by default when page_chunks=False
+                page_separator = "\n-----\n"
+                if page_separator in markdown:
+                    markdown_pages = markdown.split(page_separator)
+                else:
+                    # Fallback: treat entire result as single page
+                    markdown_pages = [markdown]
+                pages_text = markdown_pages
+            # When page_chunks=True, we get a list of page dicts with metadata
+            elif isinstance(md_result, list) and chunks is not None:
+                # chunks contains the list of page dicts
+                # markdown already contains the joined text from normalize_pymupdf4llm_result
+                page_chunks = chunks
+                # Extract individual page texts from chunks for per-page metrics
+                page_texts = []
+                for chunk in chunks:
+                    if isinstance(chunk, dict):
+                        text = chunk.get("text") or chunk.get("markdown") or chunk.get("md") or ""
+                        if isinstance(text, str):
+                            page_texts.append(text)
+                markdown_pages = page_texts if page_texts else [markdown]
+                pages_text = markdown_pages
+            else:
+                # Fallback for any other format
+                markdown_pages = [markdown]
+                pages_text = [markdown]
+
+            emit_progress(
+                "EXTRACT_PYMUPDF4LLM",
+                f"Extracted {len(markdown_pages)} pages",
+                70,
+                job_id,
+            )
+
+            # Extract JSON if available (single pass for all pages)
+            if callable(to_json_fn):
+                try:
+                    json_result = to_json_fn(doc)
+                    if isinstance(json_result, list):
+                        json_pages = json_result
+                    else:
+                        json_pages = [json_result]
+                except Exception:
+                    json_pages = []
+
+            # PREVIOUS to_json implementation (per-page in loop):
+            # if callable(to_json_fn):
+            #     try:
+            #         json_pages.append(to_json_fn(doc, pages=[index]))
+            #     except Exception:
+            #         json_pages = []
+            #         to_json_fn = None
         finally:
             doc.close()
 

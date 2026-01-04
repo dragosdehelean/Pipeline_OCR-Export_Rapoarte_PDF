@@ -83,6 +83,8 @@ type UploadResult = {
   payload: UploadPayload;
 };
 
+const activeDocStorageKey = "doc-ingest-active-doc";
+
 function formatBytes(bytes: number) {
   if (!Number.isFinite(bytes)) {
     return "0 B";
@@ -285,6 +287,35 @@ export default function UploadForm() {
         : defaultEngine
     );
   }, [availableEnginesKey, defaultEngine, isPdf, engineAvailability]);
+
+  useEffect(() => {
+    if (activeDoc || typeof window === "undefined") {
+      return;
+    }
+    const raw = window.sessionStorage.getItem(activeDocStorageKey);
+    if (!raw) {
+      return;
+    }
+    try {
+      const parsed = JSON.parse(raw) as ProcessingState;
+      if (parsed && typeof parsed.id === "string") {
+        setActiveDoc(parsed);
+      }
+    } catch {
+      window.sessionStorage.removeItem(activeDocStorageKey);
+    }
+  }, [activeDoc]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    if (activeDoc) {
+      window.sessionStorage.setItem(activeDocStorageKey, JSON.stringify(activeDoc));
+    } else {
+      window.sessionStorage.removeItem(activeDocStorageKey);
+    }
+  }, [activeDoc]);
 
   const clearSelectedFile = () => {
     setSelectedFile(null);

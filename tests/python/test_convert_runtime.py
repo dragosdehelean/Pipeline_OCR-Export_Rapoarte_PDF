@@ -554,7 +554,7 @@ def _write_pymupdf_config(path: Path) -> None:
                 "force_text": False,
                 "show_progress": False,
                 "margins": 0,
-                "table_strategy": "lines_strict",
+                "table_strategy": "",
                 "graphics_limit": 0,
                 "ignore_code": False,
             },
@@ -582,7 +582,8 @@ def test_run_conversion_pymupdf4llm_layout(tmp_path: Path, monkeypatch: pytest.M
 
     def fake_markdown(doc, pages=None, **kwargs):
         assert "extract_tables" not in kwargs
-        return {"markdown": text_body, "page_chunks": {"page": pages[0]}}
+        page_index = pages[0] if pages else 0
+        return {"markdown": text_body, "page_chunks": {"page": page_index}}
 
     def fake_json(doc, pages=None):
         return {"page": pages[0], "layout": True}

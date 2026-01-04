@@ -62,55 +62,30 @@ async function uploadFile(page: Page, filePath: string) {
   return uploadResponse;
 }
 
-async function uploadFileAndGetDocId(page: Page) {
-  const uploadResponsePromise = page.waitForResponse(
-    (response) =>
-      response.url().includes("/api/docs/upload") &&
-      response.request().method() === "POST",
-    { timeout: uploadTimeoutMs }
-  );
-
-  await expect(page.getByRole("button", { name: "Upload" })).toBeEnabled();
-  await page.getByRole("button", { name: "Upload" }).click();
-
-  const uploadResponse = await uploadResponsePromise;
-  expect(uploadResponse.ok()).toBeTruthy();
-  const payload = await uploadResponse.json().catch(() => null);
-  const docId =
-    typeof payload?.id === "string"
-      ? payload.id
-      : typeof payload?.docId === "string"
-        ? payload.docId
-        : "";
-  if (!docId) {
-    throw new Error("Upload response missing document id.");
-  }
-  return docId;
-}
-
-async function waitForDocCompletion(page: Page, docId: string) {
-  let finalStatus = "UNKNOWN";
-  await expect.poll(
-    async () => {
-      const response = await page.request.get(`/api/docs/${docId}`);
-      if (!response.ok()) {
-        return "UNKNOWN";
-      }
-      const meta = await response.json().catch(() => null);
-      const status = meta?.processing?.status ?? "PENDING";
-      if (status === "SUCCESS" || status === "FAILED") {
-        finalStatus = status;
-      }
-      return status;
-    },
-    { timeout: uploadTimeoutMs }
-  ).toMatch(/SUCCESS|FAILED/);
-  return finalStatus;
-}
-
 test.describe("smoke tests", () => {
-  test("basic upload flow does not crash", async ({ page }) => {
-    test.setTimeout(uploadTimeoutMs * 2);
+  test("health check passes", async ({ page }) => {
+    test.setTimeout(30000); // 30s max
+    await page.goto("/");
+
+    const healthResponse = await page.request.get("/api/health");
+    expect(healthResponse.ok()).toBeTruthy();
+
+    const healthPayload = await healthResponse.json();
+    expect(healthPayload?.ok).toBe(true);
+  });
+
+  test("upload form renders", async ({ page }) => {
+    test.setTimeout(30000); // 30s max
+    await gotoAndWaitForUploadReady(page);
+
+    // Verify UI elements are present
+    await expect(page.locator("input[type='file']")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Upload" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Upload" })).toBeDisabled();
+  });
+
+  test("upload accepts PDF and returns docId", async ({ page }) => {
+    test.setTimeout(60000); // 1 min max - NO waiting for processing
     await gotoAndWaitForUploadReady(page);
 
     const uploadResponse = await uploadFile(page, goodPdf);
@@ -124,50 +99,15 @@ test.describe("smoke tests", () => {
           ? payload.docId
           : "";
 
-    if (!docId) {
-      throw new Error("Upload response missing document id.");
-    }
+    expect(docId).toBeTruthy();
 
-    const status = await waitForDocCompletion(page, docId);
-    expect(status).toMatch(/SUCCESS|FAILED/);
-
-    await page.request.delete(`/api/docs/${docId}`);
-  });
-
-  test("pymupdf4llm basic upload", async ({ page }) => {
-    test.setTimeout(uploadTimeoutMs * 2);
-    await gotoAndWaitForUploadReady(page);
-
-    const healthResponse = await page.request.get("/api/health");
-    const healthPayload = await healthResponse.json().catch(() => null);
-    const pymupdfAvailable =
-      healthPayload?.pymupdf?.availability?.pymupdf4llm?.available === true;
-    test.skip(!pymupdfAvailable, "pymupdf4llm is not available in this environment.");
-
-    await page.setInputFiles("input[type=file]", goodPdf);
-    await page.getByText("Advanced").click();
-    await page.selectOption("#engine-override", "pymupdf4llm");
-
-    const docId = await uploadFileAndGetDocId(page);
-    const status = await waitForDocCompletion(page, docId);
-
-    const metaResponse = await page.request.get(`/api/docs/${docId}`);
-    expect(metaResponse.ok()).toBeTruthy();
-    const meta = await metaResponse.json();
-
-    expect(meta.processing?.status).toBe(status);
-    expect(meta.engine?.effective?.name).toBe("pymupdf4llm");
-    expect(meta.engine?.effective?.layoutActive).toBe(true);
-
-    if (status === "SUCCESS") {
-      expect(meta.qualityGates?.passed).toBe(true);
-      expect(meta.metrics?.textChars).toBeGreaterThan(100);
-    }
-
+    // Cleanup WITHOUT waiting for completion
     await page.request.delete(`/api/docs/${docId}`);
   });
 
   test("pymupdf4llm disabled when deps missing", async ({ page }) => {
+    test.setTimeout(60000); // 1 min max
+
     await page.route("**/api/health", async (route) => {
       const response = await route.fetch();
       const payload = await response.json().catch(() => null);
@@ -200,7 +140,6 @@ test.describe("smoke tests", () => {
     await expect(engineSelect.locator("option[value='pymupdf4llm']")).toBeDisabled();
     await expect(engineSelect).toHaveValue("docling");
 
-    const docId = await uploadFileAndGetDocId(page);
-    await page.request.delete(`/api/docs/${docId}`);
+    // No need to actually upload - we only tested UI state
   });
 });

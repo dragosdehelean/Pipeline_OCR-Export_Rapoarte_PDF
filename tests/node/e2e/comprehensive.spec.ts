@@ -173,7 +173,9 @@ test.describe("upload comprehensive tests", () => {
     await page.setInputFiles("input[type=file]", goodPdf);
     const docId = await uploadFile(page, goodPdf);
 
-    await expect(page.locator(".alert-title", { hasText: "Processing complete" })).toBeVisible();
+    await expect(
+      page.locator(".alert-title", { hasText: "Processing complete" })
+    ).toBeVisible({ timeout: uploadTimeoutMs });
 
     // Navigate to details page
     await page.goto(`/docs/${docId}`);

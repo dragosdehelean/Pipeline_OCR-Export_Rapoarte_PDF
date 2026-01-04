@@ -121,22 +121,10 @@ async function uploadFileAndGetDocId(page: Page) {
   return docId;
 }
 
-async function getDocRow(page: Page, fileName: string): Promise<Locator> {
-  const row = page.locator(`tr:has-text("${fileName}")`);
+async function getDocRowById(page: Page, docId: string): Promise<Locator> {
+  const row = page.locator(`tr[data-doc-id="${docId}"]`);
   await expect(row).toBeVisible();
   return row;
-}
-
-async function getDocId(page: Page, fileName: string): Promise<string> {
-  const row = await getDocRow(page, fileName);
-  const viewLink = row.getByRole("link", { name: "View details" });
-  await expect(viewLink).toBeVisible();
-  const href = (await viewLink.getAttribute("href")) ?? "";
-  const match = href.match(/\/docs\/([a-f0-9]+)/);
-  if (!match) {
-    throw new Error(`Could not extract doc id from href: ${href}`);
-  }
-  return match[1];
 }
 
 async function waitForDocCompletion(page: Page, docId: string) {
@@ -165,19 +153,19 @@ test.describe("standard tests", () => {
     await gotoAndWaitForUploadReady(page);
 
     await page.setInputFiles("input[type=file]", goodPdf);
-    await uploadFile(page, goodPdf);
+    const goodId = await uploadFileAndGetDocId(page);
 
-    await expect(page.locator(".alert-title", { hasText: "Processing complete" })).toBeVisible();
+    await expect(
+      page.locator(".alert-title", { hasText: "Processing complete" })
+    ).toBeVisible({ timeout: uploadTimeoutMs });
 
-    const goodRow = await getDocRow(page, "one_page_report.pdf");
+    const goodRow = await getDocRowById(page, goodId);
     const goodStatus = goodRow.locator(".badge");
     await expect(goodStatus).toBeVisible();
     await expect.poll(
       async () => (await goodStatus.textContent())?.trim(),
       { timeout: uploadTimeoutMs }
     ).toBe("SUCCESS");
-
-    const goodId = await getDocId(page, "one_page_report.pdf");
 
     // Verify exports exist via API
     const mdResponse = await page.request.get(`/api/docs/${goodId}/md`);
@@ -199,21 +187,19 @@ test.describe("standard tests", () => {
     await gotoAndWaitForUploadReady(page);
 
     await page.setInputFiles("input[type=file]", badPdf);
-    await uploadFile(page, badPdf);
+    const badId = await uploadFileAndGetDocId(page);
 
     await expect(
       page.locator(".alert-title", { hasText: "Processing failed" })
     ).toBeVisible({ timeout: uploadTimeoutMs });
 
-    const badRow = await getDocRow(page, "scan_like_no_text.pdf");
+    const badRow = await getDocRowById(page, badId);
     const badStatus = badRow.locator(".badge");
     await expect(badStatus).toBeVisible();
     await expect.poll(
       async () => (await badStatus.textContent())?.trim(),
       { timeout: uploadTimeoutMs }
     ).toBe("FAILED");
-
-    const badId = await getDocId(page, "scan_like_no_text.pdf");
 
     // Verify NO exports
     const mdResponse = await page.request.get(`/api/docs/${badId}/md`);
@@ -230,20 +216,30 @@ test.describe("standard tests", () => {
     await gotoAndWaitForUploadReady(page);
 
     await page.setInputFiles("input[type=file]", goodPdf);
-    await uploadFile(page, goodPdf);
+    const docId = await uploadFileAndGetDocId(page);
 
-    const row = await getDocRow(page, "one_page_report.pdf");
+    const row = await getDocRowById(page, docId);
     await expect(row.locator(".badge")).toBeVisible();
+    await waitForDocCompletion(page, docId);
 
     await row.getByRole("button", { name: "Delete" }).click();
     await expect(page.getByRole("heading", { name: "Confirm deletion" })).toBeVisible();
+    const deleteResponsePromise = page.waitForResponse(
+      (response) =>
+        response.url().includes(`/api/docs/${docId}`) &&
+        response.request().method() === "DELETE",
+      { timeout: uploadTimeoutMs }
+    );
     await page.getByRole("button", { name: "Yes, delete" }).click();
+
+    const deleteResponse = await deleteResponsePromise;
+    expect(deleteResponse.ok()).toBeTruthy();
 
     await expect(
       page.locator(".alert-title", { hasText: "Document deleted successfully" })
-    ).toBeVisible();
+    ).toBeVisible({ timeout: uploadTimeoutMs });
 
-    await expect(row).not.toBeVisible();
+    await expect(row).not.toBeVisible({ timeout: uploadTimeoutMs });
   });
 
   test("pymupdf4llm one_page_report succeeds", async ({ page }) => {

@@ -72,6 +72,7 @@ export default function RecentDocs({ initialDocs = [] }: { initialDocs?: DocMeta
   const docs = docsQuery.data ?? initialDocs;
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [deleteNotice, setDeleteNotice] = useState<string | null>(null);
 
   const totals = useMemo(() => {
     const total = docs.length;
@@ -169,43 +170,68 @@ export default function RecentDocs({ initialDocs = [] }: { initialDocs?: DocMeta
         </div>
       </div>
 
+      {deleteNotice ? (
+        <div className="alert success" role="status">
+          <div className="alert-title">{deleteNotice}</div>
+        </div>
+      ) : null}
+
       {filteredDocs.length === 0 ? (
         <div className="note">No documents match your filters yet.</div>
       ) : (
-        <div className="list">
-          {filteredDocs.map((doc) => {
-            const failureSummary = summarizeFailure(doc);
-            return (
-              <div className="list-item" key={doc.id} data-status={doc.status}>
-                <div className="list-item-top">
-                  <StatusBadge status={doc.status} />
-                  <Link className="doc-link" href={`/docs/${doc.id}`}>
-                    {doc.originalFileName}
-                  </Link>
-                  <div className="list-item-actions">
-                    <Link className="ghost-link" href={`/docs/${doc.id}`}>
-                      View details
-                    </Link>
-                    <DeleteDocButton
-                      docId={doc.id}
-                      label="Delete"
-                      className="ghost-link danger"
-                      ariaLabel={`Delete ${doc.originalFileName}`}
-                    />
-                  </div>
-                </div>
-                {failureSummary ? (
-                  <div className="note">Reason: {failureSummary}</div>
-                ) : null}
-                <div className="meta-row">
-                  <span>Created: {formatDateTime(doc.createdAt)}</span>
-                  <span>Pages: {formatNumber(doc.metrics.pages)}</span>
-                  <span>Text chars: {formatNumber(doc.metrics.textChars)}</span>
-                  <span>Markdown chars: {formatNumber(doc.metrics.mdChars)}</span>
-                </div>
-              </div>
-            );
-          })}
+        <div className="table-wrap">
+          <table className="docs-table">
+            <thead>
+              <tr>
+                <th>Status</th>
+                <th>Document</th>
+                <th>Actions</th>
+                <th>Created</th>
+                <th>Pages</th>
+                <th>Text chars</th>
+                <th>Markdown chars</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredDocs.map((doc) => {
+                const failureSummary = summarizeFailure(doc);
+                return (
+                  <tr key={doc.id} data-status={doc.status} data-doc-id={doc.id}>
+                    <td>
+                      <StatusBadge status={doc.status} />
+                    </td>
+                    <td>
+                      <Link className="doc-link" href={`/docs/${doc.id}`}>
+                        {doc.originalFileName}
+                      </Link>
+                      {failureSummary ? (
+                        <div className="note">Reason: {failureSummary}</div>
+                      ) : null}
+                    </td>
+                    <td>
+                      <div className="table-actions">
+                        <Link className="ghost-link" href={`/docs/${doc.id}`}>
+                          View details
+                        </Link>
+                        <DeleteDocButton
+                          docId={doc.id}
+                          label="Delete"
+                          className="ghost-link danger"
+                          onDeleted={() =>
+                            setDeleteNotice("Document deleted successfully")
+                          }
+                        />
+                      </div>
+                    </td>
+                    <td>{formatDateTime(doc.createdAt)}</td>
+                    <td>{formatNumber(doc.metrics.pages)}</td>
+                    <td>{formatNumber(doc.metrics.textChars)}</td>
+                    <td>{formatNumber(doc.metrics.mdChars)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
     </div>

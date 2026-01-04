@@ -30,7 +30,9 @@
       "Bash(git restore:*)",
       "Bash(timeout 120 bash:*)",
       "Bash(services/docling_worker/.venv/Scripts/python.exe tests/python/test_pymupdf4llm_long_report.py)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(Get-Content \"C:\\\\Users\\\\drago\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--Programming-Playground-AI-Pipeline-OCR-Export-Rapoarte-PDF\\\\tasks\\\\b175320.output\" -Tail 50)",
+      "Bash(netstat:*)"
     ]
   }
 }

@@ -3,8 +3,9 @@
  */
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import type { DocMeta } from "../_lib/schema";
 
 type DeleteDocResponse = {
   id: string;
@@ -51,11 +52,20 @@ export default function DeleteDocButton({
 }: DeleteDocButtonProps) {
   const queryClient = useQueryClient();
   const [error, setError] = useState("");
+  const [isConfirming, setIsConfirming] = useState(false);
+  const dialogId = useId();
 
   const mutation = useMutation({
     mutationFn: () => deleteDoc(docId),
     onSuccess: () => {
       setError("");
+      setIsConfirming(false);
+      queryClient.setQueryData<DocMeta[]>(["docs"], (current) => {
+        if (!Array.isArray(current)) {
+          return current;
+        }
+        return current.filter((doc) => doc.id !== docId);
+      });
       queryClient.invalidateQueries({ queryKey: ["docs"] });
       if (redirectTo) {
         window.location.assign(redirectTo);
@@ -68,11 +78,8 @@ export default function DeleteDocButton({
     }
   });
 
-  const handleClick = () => {
+  const handleConfirm = () => {
     if (mutation.isPending) {
-      return;
-    }
-    if (!window.confirm(confirmMessage)) {
       return;
     }
     setError("");
@@ -84,12 +91,48 @@ export default function DeleteDocButton({
       <button
         type="button"
         className={className}
-        onClick={handleClick}
+        onClick={() => {
+          if (!mutation.isPending) {
+            setError("");
+            setIsConfirming(true);
+          }
+        }}
         disabled={mutation.isPending}
         aria-label={ariaLabel ?? label}
       >
         {mutation.isPending ? "Deleting..." : label}
       </button>
+      {isConfirming ? (
+        <div className="modal-backdrop" role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={dialogId}
+          >
+            <h3 id={dialogId}>Confirm deletion</h3>
+            <p className="note">{confirmMessage}</p>
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="button ghost"
+                onClick={() => setIsConfirming(false)}
+                disabled={mutation.isPending}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="button danger"
+                onClick={handleConfirm}
+                disabled={mutation.isPending}
+              >
+                {mutation.isPending ? "Deleting..." : "Yes, delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {error ? (
         <div className="note delete-error" role="alert">
           {error}
