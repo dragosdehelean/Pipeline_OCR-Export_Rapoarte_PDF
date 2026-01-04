@@ -170,6 +170,11 @@ body {
   color: var(--accent-strong);
 }
 
+.button.danger {
+  background: var(--danger);
+  color: #ffffff;
+}
+
 .stats-grid {
   display: grid;
   gap: 12px;
@@ -253,6 +258,45 @@ body {
   gap: 12px;
 }
 
+.table-wrap {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fbfbfb;
+  overflow-x: auto;
+}
+
+.docs-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 760px;
+}
+
+.docs-table th,
+.docs-table td {
+  padding: 12px 14px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+
+.docs-table th {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  background: #f6f8f4;
+}
+
+.docs-table tr:last-child td {
+  border-bottom: none;
+}
+
+.table-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .list-item {
   display: grid;
   gap: 8px;
@@ -267,6 +311,13 @@ body {
   grid-template-columns: auto 1fr auto;
   align-items: center;
   gap: 12px;
+}
+
+.list-item-actions {
+  display: flex;
+  gap: 8px;
+  justify-self: end;
+  flex-wrap: wrap;
 }
 
 .doc-link {
@@ -285,6 +336,43 @@ body {
   border: 1px solid var(--border);
   background: #ffffff;
   justify-self: end;
+}
+
+.ghost-link.danger {
+  color: var(--danger);
+  border-color: #f2b4b4;
+}
+
+.ghost-link.danger:hover {
+  background: #fff1f1;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 22, 30, 0.45);
+  z-index: 60;
+}
+
+.modal {
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 20px;
+  width: min(90vw, 420px);
+  display: grid;
+  gap: 8px;
+  box-shadow: 0 20px 40px -24px rgba(15, 22, 30, 0.5);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 6px;
 }
 
 .meta-row {
@@ -568,6 +656,16 @@ pre {
   flex-wrap: wrap;
 }
 
+.delete-control {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.delete-error {
+  color: var(--danger);
+}
+
 .log-grid {
   display: grid;
   gap: 16px;
@@ -589,6 +687,10 @@ pre {
   .list-item-top {
     grid-template-columns: 1fr;
     justify-items: start;
+  }
+
+  .list-item-actions {
+    justify-self: start;
   }
 
   .ghost-link {

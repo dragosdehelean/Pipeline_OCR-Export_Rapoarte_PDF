@@ -53,6 +53,7 @@ export type QualityGatesConfig = z.infer<typeof qualityGatesSchema>;
 
 let cachedConfig: QualityGatesConfig | null = null;
 let cachedDoclingConfig: DoclingConfig | null = null;
+let cachedPyMuPDFConfig: PyMuPDFConfig | null = null;
 
 const doclingProfileSchema = z
   .object({
@@ -105,6 +106,56 @@ export const doclingConfigSchema = z
 
 export type DoclingConfig = z.infer<typeof doclingConfigSchema>;
 
+const engineSchema = z.enum(["docling", "pymupdf4llm"]);
+
+const pymupdf4llmSchema = z
+  .object({
+    requireLayout: z.boolean(),
+    toMarkdown: z
+      .object({
+        write_images: z.boolean(),
+        embed_images: z.boolean(),
+        dpi: z.number(),
+        page_chunks: z.boolean(),
+        extract_words: z.boolean().optional(),
+        force_text: z.boolean(),
+        show_progress: z.boolean(),
+        margins: z.number(),
+        table_strategy: z.string(),
+        graphics_limit: z.number(),
+        ignore_code: z.boolean()
+      })
+      .strict()
+  })
+  .strict();
+
+export const pymupdfConfigSchema = z
+  .object({
+    version: z.number(),
+    defaultEngine: engineSchema,
+    engines: z.array(engineSchema),
+    pymupdf4llm: pymupdf4llmSchema
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (!value.engines.includes(value.defaultEngine)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `defaultEngine "${value.defaultEngine}" is missing from engines.`,
+        path: ["defaultEngine"]
+      });
+    }
+    if (!value.pymupdf4llm.requireLayout) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "PyMuPDF4LLM must run in layout-only mode.",
+        path: ["pymupdf4llm", "requireLayout"]
+      });
+    }
+  });
+
+export type PyMuPDFConfig = z.infer<typeof pymupdfConfigSchema>;
+
 /**
  * Resolves the quality gates config path from env or defaults.
  */
@@ -122,6 +173,16 @@ export function getDoclingConfigPath(): string {
   return (
     process.env.DOCLING_CONFIG_PATH ||
     path.join(process.cwd(), "config", "docling.json")
+  );
+}
+
+/**
+ * Resolves the PyMuPDF config path from env or defaults.
+ */
+export function getPyMuPDFConfigPath(): string {
+  return (
+    process.env.PYMUPDF_CONFIG_PATH ||
+    path.join(process.cwd(), "config", "pymupdf.json")
   );
 }
 
@@ -164,5 +225,20 @@ export async function loadDoclingConfig(): Promise<DoclingConfig> {
   const raw = await fs.readFile(configPath, "utf-8");
   const parsed = doclingConfigSchema.parse(JSON.parse(raw));
   cachedDoclingConfig = parsed;
+  return parsed;
+}
+
+/**
+ * Loads and caches the parsed PyMuPDF config.
+ */
+export async function loadPyMuPDFConfig(): Promise<PyMuPDFConfig> {
+  if (cachedPyMuPDFConfig) {
+    return cachedPyMuPDFConfig;
+  }
+
+  const configPath = getPyMuPDFConfigPath();
+  const raw = await fs.readFile(configPath, "utf-8");
+  const parsed = pymupdfConfigSchema.parse(JSON.parse(raw));
+  cachedPyMuPDFConfig = parsed;
   return parsed;
 }

@@ -79,6 +79,15 @@ def test_export_doc_to_dict_missing_hooks_raises():
         export_doc_to_dict(NoExport())
 
 
+def test_build_pymupdf_meta_sets_mime_type(tmp_path: Path):
+    file_path = tmp_path / "input.pdf"
+    file_path.write_text("%PDF-1.4", encoding="utf-8")
+    config = {"limits": {"processTimeoutSec": 1}, "version": 1, "strict": True}
+    engine_meta = {"requested": {"name": "pymupdf4llm"}, "effective": {"name": "pymupdf4llm"}}
+    meta = convert.build_pymupdf_meta("doc-1", str(file_path), config, 0, engine_meta)
+    assert meta["source"]["mimeType"] == "application/pdf"
+
+
 def test_compute_metrics_uses_pages_attribute():
     class PagesDoc:
         def __init__(self):
@@ -320,3 +329,63 @@ def test_resolve_pdf_backend_class_and_converter(monkeypatch: pytest.MonkeyPatch
     assert isinstance(converter, DocumentConverter)
     assert InputFormat.PDF in converter.format_options
     assert converter.format_options[InputFormat.PDF].backend is DummyBackend
+
+
+def test_normalize_engine_defaults():
+    assert convert.normalize_engine(None) == "docling"
+    assert convert.normalize_engine("pymupdf4llm") == "pymupdf4llm"
+    assert convert.normalize_engine("unknown") == "docling"
+
+
+def test_get_pymupdf_version_parses_doc(monkeypatch: pytest.MonkeyPatch):
+    dummy = types.SimpleNamespace(__doc__="PyMuPDF 2.0.1: test")
+    monkeypatch.setitem(sys.modules, "pymupdf", dummy)
+    assert convert.get_pymupdf_version() == "2.0.1"
+
+
+def test_normalize_pymupdf4llm_result_tuple():
+    markdown, chunks = convert.normalize_pymupdf4llm_result(("md", {"ok": True}))
+    assert markdown == "md"
+    assert chunks == {"ok": True}
+
+
+def test_get_pymupdf4llm_version(monkeypatch: pytest.MonkeyPatch):
+    dummy = types.SimpleNamespace(version="0.1.0")
+    monkeypatch.setitem(sys.modules, "pymupdf4llm", dummy)
+    assert convert.get_pymupdf4llm_version() == "0.1.0"
+
+
+def test_get_pymupdf_version_falls_back_to_dunder(monkeypatch: pytest.MonkeyPatch):
+    dummy = types.SimpleNamespace(__doc__="no match", __version__="3.1.4")
+    monkeypatch.setitem(sys.modules, "pymupdf", dummy)
+    assert convert.get_pymupdf_version() == "3.1.4"
+
+
+def test_check_module_available_missing():
+    ok, reason = convert.check_module_available("missing_module_for_test")
+    assert ok is False
+    assert reason == "IMPORT_MISSING_MODULE_FOR_TEST_FAILED"
+
+
+def test_get_pymupdf_capabilities_shapes():
+    caps = convert.get_pymupdf_capabilities()
+    assert "pymupdf4llm" in caps
+
+
+def test_normalize_pymupdf4llm_result_dict():
+    markdown, chunks = convert.normalize_pymupdf4llm_result(
+        {"markdown": "md", "page_chunks": {"page": 1}}
+    )
+    assert markdown == "md"
+    assert chunks == {"page": 1}
+
+
+def test_normalize_pymupdf4llm_result_list_page_chunks():
+    """Test page_chunks=True mode which returns a list of page dicts."""
+    result = [
+        {"text": "Page 1 content", "metadata": {"page": 1}},
+        {"text": "Page 2 content", "metadata": {"page": 2}},
+    ]
+    markdown, chunks = convert.normalize_pymupdf4llm_result(result)
+    assert markdown == "Page 1 content\n\nPage 2 content"
+    assert chunks == result

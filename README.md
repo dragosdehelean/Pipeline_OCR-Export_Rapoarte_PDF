@@ -1,7 +1,7 @@
-<!-- @fileoverview Project setup, scripts, and structure for the Docling ingestion pipeline. -->
-# Doc Ingestion & Export (Docling-only)
+<!-- @fileoverview Project setup, scripts, and structure for the ingestion pipeline. -->
+# Doc Ingestion & Export
 
-Local-first Next.js app for PDF/DOCX upload, Docling conversion, strict quality gates, and Markdown/JSON exports.
+Local-first Next.js app for PDF/DOCX upload, configurable extraction engines, strict quality gates, and Markdown/JSON exports.
 
 ## Prerequisites
 - Node.js 20.9+
@@ -26,6 +26,7 @@ On macOS/Linux:
 cp .env.local.example .env.local
 ```
 Also set `DOCLING_WORKER` to `services/docling_worker/convert.py`.
+Optionally set `PYMUPDF_CONFIG_PATH` to `config/pymupdf.json`.
 
 4) Run the app:
 ```
@@ -37,13 +38,20 @@ Install uv (once):
 ```
 python -m pip install --user uv
 ```
+Windows tip: if `uv` is not recognized, you can run commands via Python.
+Equivalent examples:
+- Preferred: `uv sync --locked --group test`
+- Fallback: `python -m uv sync --locked --group test`
 Create a worker venv and sync deps:
+If `uv` is not recognized, use `python -m uv` for each command below.
 ```
 cd services/docling_worker
 uv venv
-uv sync --group test
+uv sync --locked --group test
 ```
+Always use `--locked` to keep the worker venv aligned with `uv.lock` and prevent dependency drift.
 Run worker tests:
+If `uv` is not recognized, use `python -m uv` for the command below.
 ```
 uv run pytest -q
 ```
@@ -105,11 +113,21 @@ Use an existing dev server for UX audit:
 $env:UX_AUDIT_BASE_URL="http://127.0.0.1:3000"; npm run test:ux
 ```
 Python tests:
+If `uv` is not recognized, use `python -m uv` for the command below.
 ```
-python -m pytest -q --cov=services/docling_worker
+cd services/docling_worker
+uv run pytest -q
 ```
 
-## Processing profile
+## Engines and profiles
+- Default engine is Docling.
+- PyMuPDF4LLM is layout-only (requires `pymupdf-layout`).
+- If layout deps are missing, PyMuPDF4LLM is unavailable.
+- `pymupdf4llm.show_progress` (console tqdm) stays disabled to keep worker stdout JSONL-only.
+- The UI progress bar still updates because the worker emits per-page `emit_progress(...)` events.
+- Do not enable any library progress output to stdout; it can break JSON parsing.
+
+### Docling profiles
 - The default profile is `digital-balanced`: OCR is disabled by design, table structure runs in FAST mode, and the PDF backend is set to `dlparse_v2` in `config/docling.json`.
 - `digital-fast` is available as a profile with table structure disabled.
 - `digital-accurate` uses `dlparse_v4` with TableFormer ACCURATE.
@@ -125,17 +143,22 @@ app/                      Next.js app router (UI + route handlers)
   _components/            UI components
   _lib/                   Shared logic (storage, config, schema, etc.)
 services/docling_worker/  Python Docling worker
-config/                   Quality gates config + Docling profiles
+config/                   Quality gates config + Docling/PyMuPDF configs
 tests/
   node/
     unit/
     integration/
     e2e/
-      ux-audit/            UX audit config/specs/output + ux diff script
+      config/              E2E constants and parsed gates config
+      helpers/             Shared E2E helpers
+      pages/               Page objects for E2E locators
+      specs/               Playwright specs by feature
+        ux-audit/          UX audit spec (optional)
+      ux-audit/            UX audit config/output + ux diff script
       test-results/        Playwright output (gitignored)
   python/
   fixtures/
-    docs/                 PDF fixtures + generators (e.g. generate_big_pdf.py)
+    docs/                 PDF fixtures
 data/                     Runtime uploads/exports (gitignored)
 tests/node/e2e/data-test/  E2E data dir (gitignored)
 ```
@@ -143,6 +166,7 @@ tests/node/e2e/data-test/  E2E data dir (gitignored)
 ## Notes
 - `config/quality-gates.json` is the single source of truth for thresholds and limits.
 - `config/docling.json` defines the Docling profiles + preflight settings.
+- `config/pymupdf.json` defines PyMuPDF4LLM defaults.
 - All artifacts are stored under `data/` (gitignored).
 - `.env.local` stays local and is gitignored.
 - Client server-state is managed with TanStack Query.
@@ -151,5 +175,3 @@ tests/node/e2e/data-test/  E2E data dir (gitignored)
 - UX audit outputs live under `tests/node/e2e/ux-audit`.
 - Python coverage data is stored at `tests/python/.coverage` (gitignored) and configured via `tests/python/.coveragerc`.
 - Vitest coverage reports are stored at `tests/node/coverage` (gitignored).
-- Use `scripts/bench_convert.py --input <path>` to benchmark a single conversion locally.
-- Use `scripts/bench_worker_reuse.py --input <path>` to compare first vs. hot reuse spawn timings.

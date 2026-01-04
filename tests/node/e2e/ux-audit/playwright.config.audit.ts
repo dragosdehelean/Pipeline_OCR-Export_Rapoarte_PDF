@@ -6,13 +6,14 @@ import path from "node:path";
 
 const rootDir = process.cwd();
 const auditDir = path.join(rootDir, "tests", "node", "e2e", "ux-audit");
+const auditSpecDir = path.join(rootDir, "tests", "node", "e2e", "specs", "ux-audit");
 const dataDir =
   process.env.DATA_DIR || path.join(rootDir, "tests", "node", "e2e", "data-test");
 const gatesConfigPath =
   process.env.GATES_CONFIG_PATH || path.join(rootDir, "config", "quality-gates.json");
 const doclingWorker =
   process.env.DOCLING_WORKER ||
-  path.join(rootDir, "tests", "fixtures", "worker", "fake_worker.py");
+  path.join(rootDir, "services", "docling_worker", "convert.py");
 const pythonBin = process.env.PYTHON_BIN || "python";
 const auditPort = Number(process.env.UX_AUDIT_PORT || "3000");
 const externalBaseUrl = process.env.UX_AUDIT_BASE_URL;
@@ -26,13 +27,18 @@ process.env.DOCLING_WORKER = doclingWorker;
 process.env.PYTHON_BIN = pythonBin;
 
 export default defineConfig({
-  testDir: auditDir,
+  testDir: auditSpecDir,
   testMatch: "**/*.spec.ts",
   outputDir: path.join(auditDir, "test-results"),
   timeout: 60_000,
+  workers: process.env.CI ? 1 : undefined,
+  fullyParallel: true,
+  retries: process.env.CI ? 2 : 0,
   use: {
     baseURL,
-    trace: "retain-on-failure"
+    trace: "on-first-retry",
+    screenshot: "only-on-failure",
+    video: "on-first-retry"
   },
   webServer: externalBaseUrl
     ? undefined

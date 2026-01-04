@@ -7,6 +7,8 @@ import { NextResponse } from "next/server";
 import {
   getDoclingConfigPath,
   getGatesConfigPath,
+  getPyMuPDFConfigPath,
+  loadPyMuPDFConfig,
   loadQualityGatesConfig,
   type QualityGatesConfig
 } from "../../../_lib/config";
@@ -75,9 +77,8 @@ export async function POST(req: Request) {
   }
 
   const file = formData.get("file");
-  const deviceOverride = parseDeviceOverride(formData.get("deviceOverride"));
   const profileOverride = parseProfile(formData.get("profile"));
-
+  const parsedEngine = parseEngine(formData.get("engine"));
   if (!isFileLike(file)) {
     return jsonError({
       status: 400,
@@ -89,6 +90,7 @@ export async function POST(req: Request) {
 
   const mimeType = file.type;
   const extension = resolveExtension(getFileExtension(file.name), mimeType);
+  const isPdf = mimeType === "application/pdf";
 
   if (!config.accept.mimeTypes.includes(mimeType)) {
     return jsonError({
@@ -118,9 +120,35 @@ export async function POST(req: Request) {
     });
   }
 
+  if (isPdf && parsedEngine.invalid) {
+    return jsonError({
+      status: 400,
+      stage: "VALIDATION",
+      message: "Unsupported engine selection.",
+      requestId
+    });
+  }
+
+  const requestedEngine = isPdf ? parsedEngine.engine : null;
+
   const id = generateDocId();
   const startedAt = new Date();
   const stageTimer = createStageTimer("UPLOAD", startedAt.getTime());
+
+  let engine: EngineName = "docling";
+  if (isPdf) {
+    if (requestedEngine) {
+      engine = requestedEngine;
+    } else {
+      try {
+        const pymupdfConfig = await loadPyMuPDFConfig();
+        const candidate = pymupdfConfig.defaultEngine ?? "docling";
+        engine = pymupdfConfig.engines.includes(candidate) ? candidate : "docling";
+      } catch (error) {
+        engine = "docling";
+      }
+    }
+  }
 
   await ensureDataDirs();
   await fs.mkdir(getDocExportDir(id), { recursive: true });
@@ -268,8 +296,9 @@ export async function POST(req: Request) {
     dataDir: getDataDir(),
     gatesPath: getGatesConfigPath(),
     doclingConfigPath: getDoclingConfigPath(),
-    deviceOverride,
-    profile: profileOverride,
+    pymupdfConfigPath: getPyMuPDFConfigPath(),
+    engine,
+        profile: profileOverride,
     requestId,
     timeoutMs: timeoutSec * 1000,
     stdoutTailBytes: config.limits.stdoutTailKb * 1024,
@@ -296,6 +325,7 @@ export async function POST(req: Request) {
         progressState
       });
       logDoclingProof(meta);
+      logEngineProof(meta);
       const timingLog = formatStageTimingsLog({
         docId: id,
         requestId,
@@ -454,6 +484,8 @@ type ProgressState = {
   message: string;
   progress: number;
 };
+
+type EngineName = "docling" | "pymupdf4llm";
 
 type StageTiming = {
   stage: string;
@@ -649,23 +681,28 @@ function resolveExtension(extension: string, mimeType: string) {
   return "";
 }
 
-function parseDeviceOverride(value: FormDataEntryValue | null) {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "auto" || normalized === "cpu" || normalized === "cuda") {
-    return normalized;
-  }
-  return null;
-}
-
 function parseProfile(value: FormDataEntryValue | null) {
   if (typeof value !== "string") {
     return null;
   }
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function parseEngine(
+  value: FormDataEntryValue | null
+): { hasValue: boolean; engine: EngineName | null; invalid: boolean } {
+  if (typeof value !== "string") {
+    return { hasValue: false, engine: null, invalid: false };
+  }
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return { hasValue: false, engine: null, invalid: false };
+  }
+  if (normalized === "docling" || normalized === "pymupdf4llm") {
+    return { hasValue: true, engine: normalized, invalid: false };
+  }
+  return { hasValue: true, engine: null, invalid: true };
 }
 
 function resolveStartedAt(meta: MetaFile, fallback: Date) {
@@ -798,6 +835,22 @@ function logDoclingProof(meta: MetaFile) {
     effective
   };
   console.info(`INGEST_META ${JSON.stringify(payload)}`);
+}
+
+function logEngineProof(meta: MetaFile) {
+  const requested = meta.engine?.requested ?? null;
+  const effective = meta.engine?.effective ?? null;
+  if (!requested && !effective) {
+    return;
+  }
+  const payload = {
+    event: "ingest_engine_effective",
+    docId: meta.id,
+    requestId: meta.requestId,
+    requested,
+    effective
+  };
+  console.info(`INGEST_ENGINE_EFFECTIVE ${JSON.stringify(payload)}`);
 }
 
 function appendLogLineToMeta(meta: MetaFile, line: string, maxBytes: number): MetaFile {

@@ -31,6 +31,17 @@ type HealthDocling = {
   profiles: string[];
 };
 
+type EngineName = "docling" | "pymupdf4llm";
+
+type HealthPyMuPDF = {
+  engines: EngineName[];
+  defaultEngine: EngineName;
+  availability?: {
+    pymupdf4llm: { available: boolean; reason?: string | null };
+  };
+  configError?: string;
+};
+
 type HealthPayload = {
   ok?: boolean;
   missingEnv?: string[];
@@ -38,6 +49,7 @@ type HealthPayload = {
   configError?: string | null;
   docling?: HealthDocling | null;
   doclingConfigError?: string | null;
+  pymupdf?: HealthPyMuPDF | null;
 };
 
 type UploadError = {
@@ -47,8 +59,6 @@ type UploadError = {
   stage?: string;
   docId?: string;
 };
-
-type DeviceOverride = "auto" | "cpu" | "cuda";
 
 type ProcessingState = {
   id: string;
@@ -63,8 +73,8 @@ type UploadPayload = Record<string, unknown>;
 
 type UploadRequest = {
   file: File;
-  deviceOverride: DeviceOverride;
   profile: string | null;
+  engine: EngineName;
 };
 
 type UploadResult = {
@@ -73,21 +83,7 @@ type UploadResult = {
   payload: UploadPayload;
 };
 
-type BenchmarkStats = {
-  totalMs: number | null;
-  convertMs: number | null;
-  pages: number | null;
-  pagesPerSec: number | null;
-  requestedDevice: string | null;
-  effectiveDevice: string | null;
-  cudaAvailable: boolean | null;
-  reason: string | null;
-};
-
-type BenchmarkResult = {
-  cpu: BenchmarkStats;
-  cuda: BenchmarkStats;
-};
+const activeDocStorageKey = "doc-ingest-active-doc";
 
 function formatBytes(bytes: number) {
   if (!Number.isFinite(bytes)) {
@@ -148,26 +144,6 @@ function extractDocId(payload: UploadPayload): string | null {
   return getString(payload.id) ?? getString(payload.docId) ?? null;
 }
 
-function buildBenchmarkStats(meta: MetaFile): BenchmarkStats {
-  const totalMs = getNumber(meta.processing?.durationMs) ?? null;
-  const convertMs = getNumber(meta.processing?.timings?.doclingConvertMs) ?? null;
-  const pages = getNumber(meta.metrics?.pages) ?? null;
-  const pagesPerSec =
-    pages && convertMs && convertMs > 0 ? pages / (convertMs / 1000) : null;
-  const accelerator = meta.processing?.accelerator;
-  return {
-    totalMs,
-    convertMs,
-    pages,
-    pagesPerSec,
-    requestedDevice: accelerator?.requestedDevice ?? null,
-    effectiveDevice: accelerator?.effectiveDevice ?? null,
-    cudaAvailable:
-      typeof accelerator?.cudaAvailable === "boolean" ? accelerator.cudaAvailable : null,
-    reason: accelerator?.reason ?? null
-  };
-}
-
 async function fetchHealth(signal?: AbortSignal): Promise<HealthPayload> {
   const response = await fetch("/api/health", { cache: "no-store", signal });
   if (!response.ok) {
@@ -210,12 +186,8 @@ export default function UploadForm() {
   const [isDragActive, setIsDragActive] = useState(false);
   const [activeDoc, setActiveDoc] = useState<ProcessingState | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
-  const [deviceOverride, setDeviceOverride] = useState<DeviceOverride>("auto");
-  const [benchmarkResult, setBenchmarkResult] = useState<BenchmarkResult | null>(
-    null
-  );
-  const [isBenchmarking, setIsBenchmarking] = useState(false);
   const [profileOverride, setProfileOverride] = useState<string | null>(null);
+  const [engine, setEngine] = useState<EngineName>("docling");
   const lastStatusRef = useRef<ProcessingState["status"] | null>(null);
 
   const healthQuery = useQuery({
@@ -228,8 +200,13 @@ export default function UploadForm() {
     ok: healthPayload?.ok === true && !healthQuery.isError,
     missingEnv: Array.isArray(healthPayload?.missingEnv) ? healthPayload?.missingEnv : [],
     config: healthPayload?.config ?? null,
-    configError: healthPayload?.configError ?? healthPayload?.doclingConfigError ?? null,
-    docling: healthPayload?.docling ?? null
+    configError:
+      healthPayload?.configError ??
+      healthPayload?.doclingConfigError ??
+      healthPayload?.pymupdf?.configError ??
+      null,
+    docling: healthPayload?.docling ?? null,
+    pymupdf: healthPayload?.pymupdf ?? null
   };
 
   const acceptExtensions = health.config?.accept?.extensions ?? [];
@@ -256,6 +233,42 @@ export default function UploadForm() {
         ? defaultProfile
         : doclingProfiles[0]) || null;
 
+  const selectedExtension = selectedFile ? getFileExtension(selectedFile.name) : "";
+  const isPdf =
+    selectedFile?.type === "application/pdf" || selectedExtension === ".pdf";
+  const isDocx =
+    selectedFile?.type ===
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+    selectedExtension === ".docx";
+
+  const availableEngines = useMemo<EngineName[]>(() => {
+    if (!isPdf) {
+      return ["docling"];
+    }
+    const engines = health.pymupdf?.engines ?? [];
+    return engines.length ? engines : ["docling"];
+  }, [health.pymupdf?.engines, isPdf]);
+  const availableEnginesKey = availableEngines.join("|");
+  const engineAvailability = health.pymupdf?.availability ?? null;
+  const isEngineAvailable = (engineName: EngineName) => {
+    if (engineName === "docling") {
+      return true;
+    }
+    if (!engineAvailability) {
+      return false;
+    }
+    return engineAvailability.pymupdf4llm.available;
+  };
+  const enabledEngines = availableEngines.filter((engineName) =>
+    isEngineAvailable(engineName)
+  );
+  const defaultEngine = (() => {
+    const candidate = health.pymupdf?.defaultEngine ?? "docling";
+    if (availableEngines.includes(candidate) && isEngineAvailable(candidate)) {
+      return candidate;
+    }
+    return enabledEngines[0] ?? "docling";
+  })();
   useEffect(() => {
     if (!defaultProfile) {
       return;
@@ -263,9 +276,49 @@ export default function UploadForm() {
     setProfileOverride((current) => current ?? defaultProfile);
   }, [defaultProfile]);
 
+  useEffect(() => {
+    if (!isPdf) {
+      setEngine("docling");
+      return;
+    }
+    setEngine((current) =>
+      availableEngines.includes(current) && isEngineAvailable(current)
+        ? current
+        : defaultEngine
+    );
+  }, [availableEnginesKey, defaultEngine, isPdf, engineAvailability]);
+
+  useEffect(() => {
+    if (activeDoc || typeof window === "undefined") {
+      return;
+    }
+    const raw = window.sessionStorage.getItem(activeDocStorageKey);
+    if (!raw) {
+      return;
+    }
+    try {
+      const parsed = JSON.parse(raw) as ProcessingState;
+      if (parsed && typeof parsed.id === "string") {
+        setActiveDoc(parsed);
+      }
+    } catch {
+      window.sessionStorage.removeItem(activeDocStorageKey);
+    }
+  }, [activeDoc]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    if (activeDoc) {
+      window.sessionStorage.setItem(activeDocStorageKey, JSON.stringify(activeDoc));
+    } else {
+      window.sessionStorage.removeItem(activeDocStorageKey);
+    }
+  }, [activeDoc]);
+
   const clearSelectedFile = () => {
     setSelectedFile(null);
-    setBenchmarkResult(null);
     if (inputRef.current) {
       inputRef.current.value = "";
     }
@@ -276,7 +329,7 @@ export default function UploadForm() {
       // WHY: XMLHttpRequest exposes upload progress events; fetch does not.
       const formData = new FormData();
       formData.append("file", request.file);
-      formData.append("deviceOverride", request.deviceOverride);
+      formData.append("engine", request.engine);
       if (request.profile) {
         formData.append("profile", request.profile);
       }
@@ -412,8 +465,8 @@ export default function UploadForm() {
     try {
       await uploadMutation.mutateAsync({
         file,
-        deviceOverride,
-        profile: resolvedProfile
+        profile: resolvedProfile,
+        engine: isPdf ? engine : "docling"
       });
     } catch (err) {
       setError({ message: "Upload failed. Check the console for details." });
@@ -489,7 +542,6 @@ export default function UploadForm() {
     setIsDragActive(false);
     setSelectedFile(file);
     setError(null);
-    setBenchmarkResult(null);
   };
 
   const onDragOver = (event: DragEvent<HTMLDivElement>) => {
@@ -507,24 +559,17 @@ export default function UploadForm() {
     const file = event.target.files?.[0] ?? null;
     setSelectedFile(file);
     setError(null);
-    setBenchmarkResult(null);
   };
 
   const isReady = !health.loading && health.ok;
   const maxPages = health.config?.limits?.maxPages ?? null;
   const timeoutSec = health.config?.limits?.processTimeoutSec ?? null;
+  const isDoclingEngine = engine === "docling";
+  const showEngineSelector = isPdf || !selectedFile;
   const canUpload =
     isReady &&
     !!selectedFile &&
     !isUploading &&
-    !isBenchmarking &&
-    !isFileTooLarge &&
-    !fileTypeError;
-  const canBenchmark =
-    isReady &&
-    !!selectedFile &&
-    !isUploading &&
-    !isBenchmarking &&
     !isFileTooLarge &&
     !fileTypeError;
 
@@ -547,77 +592,11 @@ export default function UploadForm() {
 
   const acceleratorMeta = docQuery.data?.processing?.accelerator ?? null;
 
-  const waitForDocCompletion = async (docId: string, timeoutMs: number) => {
-    const startedAt = Date.now();
-    while (Date.now() - startedAt < timeoutMs) {
-      const meta = await fetchDocMeta(docId);
-      const status = meta.processing?.status;
-      if (status === "FAILED" || status === "SUCCESS") {
-        return meta;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-    }
-    throw new Error("Benchmark timed out.");
-  };
-
-  const runBenchmark = async () => {
-    if (!selectedFile || !canBenchmark) {
-      setError({ message: "Select a valid file before benchmarking." });
-      return;
-    }
-
-    setBenchmarkResult(null);
-    setError(null);
-    setIsBenchmarking(true);
-    const benchmarkTimeoutMs =
-      (timeoutSec && Number.isFinite(timeoutSec) ? timeoutSec : 240) * 1000 + 15000;
-
-    try {
-      const cpuUpload = await uploadMutation.mutateAsync({
-        file: selectedFile,
-        deviceOverride: "cpu",
-        profile: resolvedProfile
-      });
-      if (!cpuUpload.ok) {
-        throw new Error("CPU benchmark upload failed.");
-      }
-      const cpuDocId = extractDocId(cpuUpload.payload);
-      if (!cpuDocId) {
-        throw new Error("CPU benchmark response missing document id.");
-      }
-      const cpuMeta = await waitForDocCompletion(cpuDocId, benchmarkTimeoutMs);
-
-      const cudaUpload = await uploadMutation.mutateAsync({
-        file: selectedFile,
-        deviceOverride: "cuda",
-        profile: resolvedProfile
-      });
-      if (!cudaUpload.ok) {
-        throw new Error("CUDA benchmark upload failed.");
-      }
-      const cudaDocId = extractDocId(cudaUpload.payload);
-      if (!cudaDocId) {
-        throw new Error("CUDA benchmark response missing document id.");
-      }
-      const cudaMeta = await waitForDocCompletion(cudaDocId, benchmarkTimeoutMs);
-
-      setBenchmarkResult({
-        cpu: buildBenchmarkStats(cpuMeta),
-        cuda: buildBenchmarkStats(cudaMeta)
-      });
-    } catch (err) {
-      setError({
-        message: err instanceof Error ? err.message : "Benchmark failed."
-      });
-    } finally {
-      setIsBenchmarking(false);
-    }
-  };
-
   return (
     <form
       className={`upload-zone ${isDragActive ? "drag-active" : ""}`}
       onSubmit={onSubmit}
+      aria-label="Upload form"
     >
       {!health.loading && !health.ok ? (
         <div className="alert error" role="alert">
@@ -628,6 +607,7 @@ export default function UploadForm() {
             <li>Set `PYTHON_BIN`, `DOCLING_WORKER`, `DATA_DIR`</li>
             <li>Set `GATES_CONFIG_PATH` to `config/quality-gates.json`</li>
             <li>Set `DOCLING_CONFIG_PATH` to `config/docling.json` (optional)</li>
+            <li>Set `PYMUPDF_CONFIG_PATH` to `config/pymupdf.json` (optional)</li>
             <li>Restart `npm run dev` after editing `.env.local`</li>
           </ul>
           {health.missingEnv.length > 0 ? (
@@ -642,7 +622,7 @@ export default function UploadForm() {
       ) : null}
       <div className="upload-header">
         <strong>Upload PDF/DOCX</strong>
-        <div className="note">Docling-only, strict quality gates.</div>
+        <div className="note">Configurable engines with strict quality gates.</div>
       </div>
       {processingState ? (
         <div
@@ -742,29 +722,51 @@ export default function UploadForm() {
       <details className="advanced-panel">
         <summary>Advanced</summary>
         <div className="upload-requirements">
-          <div>
-            <span className="label">Device:</span>{" "}
-            <select
-              id="device-override"
-              value={deviceOverride}
-              onChange={(event) =>
-                setDeviceOverride(event.target.value as DeviceOverride)
-              }
-              disabled={isUploading || isBenchmarking}
-            >
-              <option value="auto">Auto</option>
-              <option value="cpu">CPU</option>
-              <option value="cuda">CUDA</option>
-            </select>
-          </div>
+          {showEngineSelector ? (
+            <div>
+              <span className="label">Engine:</span>{" "}
+              <select
+                id="engine-override"
+                aria-label="Engine"
+                value={engine}
+                onChange={(event) => setEngine(event.target.value as EngineName)}
+                disabled={isUploading || !isPdf}
+              >
+                {availableEngines.map((engineOption) => (
+                  <option
+                    key={engineOption}
+                    value={engineOption}
+                    disabled={!isEngineAvailable(engineOption)}
+                  >
+                    {engineOption === "docling"
+                      ? "Docling"
+                      : "PyMuPDF4LLM"}
+                  </option>
+                ))}
+              </select>
+              {isDocx ? (
+                <span className="note"> Docling is required for DOCX.</span>
+              ) : null}
+              {engine === "pymupdf4llm" && isPdf ? (
+                <span className="note"> PyMuPDF4LLM runs in Layout mode only.</span>
+              ) : null}
+              {!isEngineAvailable(engine) ? (
+                <span className="note">
+                  {" "}
+                  Engine unavailable: update worker deps.
+                </span>
+              ) : null}
+            </div>
+          ) : null}
           {doclingProfiles.length ? (
             <div>
               <span className="label">Profile:</span>{" "}
               <select
                 id="profile-override"
+                aria-label="Profile"
                 value={resolvedProfile ?? ""}
                 onChange={(event) => setProfileOverride(event.target.value)}
-                disabled={isUploading || isBenchmarking}
+                disabled={isUploading || !isDoclingEngine}
               >
                 {doclingProfiles.map((profile) => (
                   <option key={profile} value={profile}>
@@ -772,6 +774,9 @@ export default function UploadForm() {
                   </option>
                 ))}
               </select>
+              {!isDoclingEngine ? (
+                <span className="note"> Docling-only (ignored by PyMuPDF).</span>
+              ) : null}
             </div>
           ) : null}
           {acceleratorMeta ? (
@@ -787,39 +792,6 @@ export default function UploadForm() {
           ) : null}
           {acceleratorMeta?.reason ? (
             <div className="note">Fallback reason: {acceleratorMeta.reason}</div>
-          ) : null}
-          <div>
-            <button
-              className="button ghost"
-              type="button"
-              onClick={runBenchmark}
-              disabled={!canBenchmark}
-            >
-              {isBenchmarking ? "Benchmarking..." : "Run benchmark (CPU vs CUDA)"}
-            </button>
-          </div>
-          {benchmarkResult ? (
-            <div className="note">
-              <strong>Benchmark summary</strong>
-              <div>
-                CPU: total {benchmarkResult.cpu.totalMs ?? 0} ms, convert{" "}
-                {benchmarkResult.cpu.convertMs ?? 0} ms,{" "}
-                {benchmarkResult.cpu.pagesPerSec
-                  ? `${benchmarkResult.cpu.pagesPerSec.toFixed(2)} pages/sec`
-                  : "n/a"}
-              </div>
-              <div>
-                CUDA: total {benchmarkResult.cuda.totalMs ?? 0} ms, convert{" "}
-                {benchmarkResult.cuda.convertMs ?? 0} ms,{" "}
-                {benchmarkResult.cuda.pagesPerSec
-                  ? `${benchmarkResult.cuda.pagesPerSec.toFixed(2)} pages/sec`
-                  : "n/a"}
-                {benchmarkResult.cuda.effectiveDevice
-                  ? ` (effective: ${benchmarkResult.cuda.effectiveDevice})`
-                  : ""}
-                {benchmarkResult.cuda.reason ? `, fallback: ${benchmarkResult.cuda.reason}` : ""}
-              </div>
-            </div>
           ) : null}
         </div>
       </details>

@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "defaultEngine": "docling",
+  "engines": ["docling", "pymupdf4llm"],
+  "pymupdf4llm": {
+    "requireLayout": true,
+    "toMarkdown": {
+      "dpi": 150,
+      "page_chunks": true,
+      "extract_words": true,
+
+      "force_text": true,
+      "ignore_code": true,
+      "show_progress": false,
+
+      "write_images": false,
+      "embed_images": false,
+
+
+      "margins": 0,
+      "table_strategy": "",
+      "graphics_limit": 0
+    }
+  }
+}

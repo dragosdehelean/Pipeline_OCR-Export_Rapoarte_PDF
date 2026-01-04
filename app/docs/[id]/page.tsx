@@ -4,6 +4,7 @@
 import fs from "node:fs/promises";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import DeleteDocButton from "../../_components/DeleteDocButton";
 import PreviewTabs from "../../_components/PreviewTabs";
 import { StatusBadge } from "../../_components/StatusBadge";
 import { resolveStatus } from "../../_lib/meta";
@@ -80,6 +81,7 @@ export default async function DocDetailsPage({
     (gate) => gate.severity === "WARN" && !gate.passed
   );
   const status = resolveStatus(meta, failedGates);
+  const failure = meta.processing?.failure ?? null;
 
   const hasMarkdown = Boolean(meta.outputs?.markdownPath);
   const hasJson = Boolean(meta.outputs?.jsonPath);
@@ -98,6 +100,15 @@ export default async function DocDetailsPage({
       <section className="card grid">
         <div className="summary-header">
           <StatusBadge status={status} />
+          <div className="summary-actions">
+            <DeleteDocButton
+              docId={docId}
+              label="Delete document"
+              className="button danger"
+              ariaLabel="Delete document"
+              redirectTo="/"
+            />
+          </div>
         </div>
 
         <div className="metrics-grid">
@@ -188,6 +199,15 @@ export default async function DocDetailsPage({
         </div>
         {meta.processing?.message ? (
           <div className="note">Message: {meta.processing.message}</div>
+        ) : null}
+        {failure ? (
+          <div className="alert error" role="alert">
+            <div className="alert-title">Failure: {failure.code}</div>
+            <div>{failure.message}</div>
+            {failure.details ? (
+              <div className="note">Details: {failure.details}</div>
+            ) : null}
+          </div>
         ) : null}
       </section>
 

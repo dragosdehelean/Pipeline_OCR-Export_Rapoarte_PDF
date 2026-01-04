@@ -9,7 +9,11 @@ description = "Docling worker for document ingestion and export."
 requires-python = ">=3.10"
 dependencies = [
   "docling",
+  "PyMuPDF",
+  "pymupdf4llm",
+  "pymupdf-layout",
   "reportlab",
+  "markupsafe",
 ]
 
 [dependency-groups]
@@ -20,3 +24,13 @@ test = [
 
 [tool.setuptools]
 py-modules = ["convert", "gates"]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu128" }]
+torchvision = [{ index = "pytorch-cu128" }]
+torchaudio = [{ index = "pytorch-cu128" }]

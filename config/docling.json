@@ -9,6 +9,13 @@
       "tableStructureMode": "fast",
       "documentTimeoutSec": 240
     },
+    "pypdfium-balanced": {
+      "pdfBackend": "pypdfium",
+      "doOcr": false,
+      "doTableStructure": true,
+      "tableStructureMode": "fast",
+      "documentTimeoutSec": 240
+    },
     "digital-fast": {
       "pdfBackend": "dlparse_v2",
       "doOcr": false,

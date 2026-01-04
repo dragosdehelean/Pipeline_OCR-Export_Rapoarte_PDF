@@ -4,6 +4,7 @@
 import { NextResponse } from "next/server";
 import {
   loadDoclingConfig,
+  loadPyMuPDFConfig,
   loadQualityGatesConfig,
   type QualityGatesConfig
 } from "../../_lib/config";
@@ -26,6 +27,14 @@ type HealthResponse = {
     defaultProfile: string;
     profiles: string[];
   } | null;
+  pymupdf: {
+    engines: string[];
+    defaultEngine: string;
+    availability?: {
+      pymupdf4llm: { available: boolean; reason?: string | null };
+    };
+    configError?: string;
+  } | null;
   doclingWorker: DoclingWorkerSnapshot | null;
   config: {
     accept: QualityGatesConfig["accept"];
@@ -39,6 +48,7 @@ type HealthResponse = {
 };
 
 type HealthConfig = NonNullable<HealthResponse["config"]>;
+type PyMuPDFAvailability = NonNullable<HealthResponse["pymupdf"]>["availability"];
 
 /**
  * Returns readiness info for UI gating and setup checks.
@@ -50,8 +60,10 @@ export async function GET() {
   let config: HealthConfig | null = null;
   let configError: string | null = null;
   let docling: HealthResponse["docling"] = null;
+  let pymupdf: HealthResponse["pymupdf"] = null;
   let doclingConfigError: string | null = null;
   let doclingWorker: DoclingWorkerSnapshot | null = null;
+  let pymupdfAvailability: PyMuPDFAvailability | null = null;
 
   if (missingEnv.length === 0) {
     try {
@@ -77,6 +89,20 @@ export async function GET() {
       doclingConfigError =
         (error as Error).message || "Failed to load docling config.";
     }
+    try {
+      const pymupdfConfig = await loadPyMuPDFConfig();
+      pymupdf = {
+        engines: pymupdfConfig.engines,
+        defaultEngine: pymupdfConfig.defaultEngine
+      };
+    } catch (error) {
+      pymupdf = {
+        engines: [],
+        defaultEngine: "docling",
+        configError:
+          (error as Error).message || "Failed to load pymupdf config."
+      };
+    }
 
     const pythonBin = process.env.PYTHON_BIN ?? "";
     const workerPath = process.env.DOCLING_WORKER ?? "";
@@ -86,6 +112,7 @@ export async function GET() {
         workerPath
       });
     }
+    pymupdfAvailability = buildPyMuPDFAvailability(doclingWorker);
   }
 
   const ok = missingEnv.length === 0 && !configError && !doclingConfigError;
@@ -96,9 +123,32 @@ export async function GET() {
     resolved,
     worker,
     docling,
+    pymupdf: pymupdf
+      ? {
+          ...pymupdf,
+          availability: pymupdfAvailability ?? undefined
+        }
+      : null,
     doclingWorker,
     config,
     configError,
     doclingConfigError
   });
+}
+
+function buildPyMuPDFAvailability(
+  worker: DoclingWorkerSnapshot | null
+): PyMuPDFAvailability | null {
+  const availability = worker?.capabilities?.pymupdf ?? null;
+  if (!availability) {
+    return {
+      pymupdf4llm: { available: false, reason: "WORKER_CAPABILITIES_UNAVAILABLE" },
+    };
+  }
+  return {
+    pymupdf4llm: {
+      available: availability.pymupdf4llm.available,
+      reason: availability.pymupdf4llm.reason ?? null
+    }
+  };
 }

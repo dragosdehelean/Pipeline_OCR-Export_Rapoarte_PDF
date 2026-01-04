@@ -117,6 +117,14 @@ export const metaDoclingSchema = z
   })
   .strict();
 
+export const metaEngineSchema = z
+  .object({
+    requested: z.record(z.string(), z.unknown()),
+    effective: z.record(z.string(), z.unknown()),
+    capabilities: z.record(z.string(), z.unknown()).optional()
+  })
+  .strict();
+
 export const processingAcceleratorSchema = z
   .object({
     requestedDevice: z.string(),
@@ -215,6 +223,7 @@ export const metaFileSchema = z
     source: metaSourceSchema,
     processing: metaProcessingSchema,
     docling: metaDoclingSchema.optional(),
+    engine: metaEngineSchema.optional(),
     outputs: metaOutputsSchema,
     metrics: metricsSchema,
     qualityGates: metaQualityGatesSchema,

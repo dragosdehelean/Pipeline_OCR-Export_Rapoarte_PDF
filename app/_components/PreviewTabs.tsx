@@ -135,10 +135,14 @@ export default function PreviewTabs({ markdown, json }: PreviewProps) {
           </button>
         </div>
         {active === "markdown" && markdown ? (
-          <pre className="preview-pre">{markdown}</pre>
+          <pre className="preview-pre" data-testid="preview-content">
+            {markdown}
+          </pre>
         ) : null}
         {active === "json" && formattedJson ? (
-          <pre className="preview-pre">{formattedJson}</pre>
+          <pre className="preview-pre" data-testid="preview-content">
+            {formattedJson}
+          </pre>
         ) : null}
       </div>
     </div>

@@ -42,6 +42,7 @@ tmp/
 tmp-worker-test*/
 .next/
 .next-e2e/
+.next-ux-audit/
 node_modules
 .env.local
 .env

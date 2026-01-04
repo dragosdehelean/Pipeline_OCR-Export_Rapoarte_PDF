@@ -1,5 +1,6 @@
 """Runtime tests for docling conversion helpers and CLI flow."""
 import json
+import sys
 import types
 from pathlib import Path
 
@@ -360,7 +361,7 @@ def test_preflight_allows_digital_pdf(tmp_path: Path, monkeypatch: pytest.Monkey
 
     monkeypatch.setattr(convert, "get_docling_converter", lambda settings: DummyConverter())
 
-    input_path = ROOT_DIR / "tests" / "fixtures" / "docs" / "short_valid_text.pdf"
+    input_path = ROOT_DIR / "tests" / "fixtures" / "docs" / "one_page_report.pdf"
     args = types.SimpleNamespace(
         input=str(input_path),
         doc_id="doc-digital",
@@ -426,7 +427,7 @@ def test_run_conversion_fails_max_pages(tmp_path: Path, monkeypatch: pytest.Monk
 
     monkeypatch.setattr(convert, "get_docling_converter", lambda settings: DummyConverter())
 
-    input_path = ROOT_DIR / "tests" / "fixtures" / "docs" / "short_valid_text.pdf"
+    input_path = ROOT_DIR / "tests" / "fixtures" / "docs" / "one_page_report.pdf"
     args = types.SimpleNamespace(
         input=str(input_path),
         doc_id="doc-max-pages",
@@ -471,6 +472,8 @@ def test_run_conversion_failure_without_docling(tmp_path: Path, monkeypatch: pyt
     assert meta_path.exists()
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
     assert meta["processing"]["status"] == "FAILED"
+    assert meta["processing"]["message"] == "docling missing"
+    assert meta["processing"]["failure"]["message"] == "docling missing"
     assert meta["logs"]["stderrTail"]
 
 
@@ -533,3 +536,168 @@ def test_converter_cache_reuses_pipeline(tmp_path: Path, monkeypatch: pytest.Mon
     assert build_calls == 1
     stats = convert.get_converter_cache_stats()
     assert stats["builds"] == 1
+
+
+def _write_pymupdf_config(path: Path) -> None:
+    payload = {
+        "version": 1,
+        "defaultEngine": "docling",
+        "engines": ["docling", "pymupdf4llm"],
+        "pymupdf4llm": {
+            "requireLayout": True,
+            "toMarkdown": {
+                "write_images": False,
+                "embed_images": False,
+                "dpi": 150,
+                "page_chunks": True,
+                "extract_words": False,
+                "force_text": False,
+                "show_progress": False,
+                "margins": 0,
+                "table_strategy": "",
+                "graphics_limit": 0,
+                "ignore_code": False,
+            },
+        },
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_run_conversion_pymupdf4llm_layout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    config = load_repo_config()
+    required = required_metrics(config)
+    min_chars = int(max(required.get("textChars", 0), required.get("mdChars", 0)))
+    min_words = int(max(required.get("textItems", 0), 1))
+    text_body = build_text(min_chars, min_words)
+
+    class DummyPage:
+        pass
+
+    class DummyDoc:
+        def __init__(self):
+            self.page_count = 1
+
+        def close(self):
+            return None
+
+    def fake_markdown(doc, pages=None, **kwargs):
+        assert "extract_tables" not in kwargs
+        page_index = pages[0] if pages else 0
+        return {"markdown": text_body, "page_chunks": {"page": page_index}}
+
+    def fake_json(doc, pages=None):
+        return {"page": pages[0], "layout": True}
+
+    dummy_pymupdf = types.SimpleNamespace(
+        open=lambda path: DummyDoc(),
+        __doc__="PyMuPDF 9.9.9",
+    )
+    dummy_pymupdf4llm = types.SimpleNamespace(
+        to_markdown=fake_markdown,
+        to_json=fake_json,
+        version="0.2.7",
+    )
+    dummy_layout = types.SimpleNamespace()
+    monkeypatch.setitem(sys.modules, "pymupdf", dummy_pymupdf)
+    monkeypatch.setitem(sys.modules, "pymupdf4llm", dummy_pymupdf4llm)
+    monkeypatch.setitem(sys.modules, "pymupdf.layout", dummy_layout)
+
+    pymupdf_config_path = tmp_path / "pymupdf.json"
+    _write_pymupdf_config(pymupdf_config_path)
+    input_path = tmp_path / "input.pdf"
+    input_path.write_text("%PDF-1.4", encoding="utf-8")
+
+    args = types.SimpleNamespace(
+        input=str(input_path),
+        doc_id="doc-pymupdf-llm",
+        data_dir=str(tmp_path),
+        gates=str(CONFIG_PATH),
+        docling_config=str(DOCLING_CONFIG_PATH),
+        pymupdf_config=str(pymupdf_config_path),
+        engine="pymupdf4llm",
+    )
+    exit_code = convert.run_conversion(args)
+    assert exit_code == 0
+    meta_path = tmp_path / "exports" / "doc-pymupdf-llm" / "meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert meta["processing"]["status"] == "SUCCESS"
+    assert meta["engine"]["effective"]["layoutActive"] is True
+
+
+def test_run_conversion_pymupdf4llm_layout_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    dummy_pymupdf = types.SimpleNamespace(__doc__="PyMuPDF 1.2.3")
+    monkeypatch.setitem(sys.modules, "pymupdf", dummy_pymupdf)
+
+    import builtins
+
+    original_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "pymupdf.layout":
+            raise ModuleNotFoundError("No module named 'pymupdf.layout'")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    pymupdf_config_path = tmp_path / "pymupdf.json"
+    _write_pymupdf_config(pymupdf_config_path)
+    input_path = tmp_path / "input.pdf"
+    input_path.write_text("%PDF-1.4", encoding="utf-8")
+
+    args = types.SimpleNamespace(
+        input=str(input_path),
+        doc_id="doc-pymupdf-layout-missing",
+        data_dir=str(tmp_path),
+        gates=str(CONFIG_PATH),
+        docling_config=str(DOCLING_CONFIG_PATH),
+        pymupdf_config=str(pymupdf_config_path),
+        engine="pymupdf4llm",
+    )
+    exit_code = convert.run_conversion(args)
+    assert exit_code == 1
+    meta_path = tmp_path / "exports" / "doc-pymupdf-layout-missing" / "meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert meta["processing"]["status"] == "FAILED"
+    assert meta["processing"]["failure"]["code"] == "PYMUPDF_LAYOUT_UNAVAILABLE"
+    assert (
+        meta["processing"]["message"] == "PyMuPDF4LLM layout-only: layout unavailable"
+    )
+
+
+def test_run_conversion_pymupdf4llm_rejects_unknown_markdown_keys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    config = load_repo_config()
+    dummy_pymupdf = types.SimpleNamespace(__doc__="PyMuPDF 1.2.3")
+    dummy_pymupdf4llm = types.SimpleNamespace(to_markdown=lambda *_args, **_kwargs: "")
+    dummy_layout = types.SimpleNamespace()
+    monkeypatch.setitem(sys.modules, "pymupdf", dummy_pymupdf)
+    monkeypatch.setitem(sys.modules, "pymupdf4llm", dummy_pymupdf4llm)
+    monkeypatch.setitem(sys.modules, "pymupdf.layout", dummy_layout)
+
+    pymupdf_config_path = tmp_path / "pymupdf.json"
+    _write_pymupdf_config(pymupdf_config_path)
+    payload = json.loads(pymupdf_config_path.read_text(encoding="utf-8"))
+    payload["pymupdf4llm"]["toMarkdown"]["unsupported_key"] = True
+    pymupdf_config_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    input_path = tmp_path / "input.pdf"
+    input_path.write_text("%PDF-1.4", encoding="utf-8")
+    args = types.SimpleNamespace(
+        input=str(input_path),
+        doc_id="doc-pymupdf-config-invalid",
+        data_dir=str(tmp_path),
+        gates=str(CONFIG_PATH),
+        docling_config=str(DOCLING_CONFIG_PATH),
+        pymupdf_config=str(pymupdf_config_path),
+        engine="pymupdf4llm",
+    )
+    exit_code = convert.run_conversion(args)
+    assert exit_code == 1
+    meta_path = tmp_path / "exports" / "doc-pymupdf-config-invalid" / "meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert meta["processing"]["status"] == "FAILED"
+    assert meta["processing"]["failure"]["code"] == "PYMUPDF_CONFIG_INVALID"
+    assert "unsupported_key" in meta["processing"]["failure"]["details"]

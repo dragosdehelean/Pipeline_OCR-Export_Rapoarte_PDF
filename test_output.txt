@@ -1,0 +1,15 @@
+Processing all 19 pages in single pass...
+  Result type: <class 'list'>
+  Markdown length: 37998
+  List length: 19
+  First element type: <class 'dict'>
+  First element keys: dict_keys(['metadata', 'toc_items', 'tables', 'images', 'graphics', 'text', 'words'])
+  List contains dicts, not strings!
+  Extracted 1 pages
+Traceback (most recent call last):
+  File "d:\Programming\Playground AI\Pipeline_OCR+Export_Rapoarte_PDF\tests\python\test_pymupdf4llm_long_report.py", line 140, in <module>
+    test_long_report_pymupdf4llm_no_fallback()
+  File "d:\Programming\Playground AI\Pipeline_OCR+Export_Rapoarte_PDF\tests\python\test_pymupdf4llm_long_report.py", line 107, in test_long_report_pymupdf4llm_no_fallback
+    assert len(markdown_pages) == 19, f"Expected 19 pages, got {len(markdown_pages)}"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Expected 19 pages, got 1

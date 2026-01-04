@@ -1,12 +1,12 @@
 <!-- @fileoverview Repository instructions for the Doc Ingestion & Export project. -->
-# Doc Ingestion & Export (Docling-only)
+# Doc Ingestion & Export
 
 ## 0) Project overview
 
 A **local-first** ingestion pipeline for **PDF/DOCX** documents and exports **Markdown + JSON** artifacts as a prerequisite step for downstream RAG (no embeddings/vector store/chunking here yet).  
 
 - **Next.js (App Router)** provides the UI and API Route Handlers (upload, orchestration, serving artifacts).
-- A **Python worker** runs **Docling** to convert documents, compute metrics, evaluate quality gates, and write artifacts.
+- A **Python worker** runs **Docling** or **PyMuPDF** engines to convert documents, compute metrics, evaluate quality gates, and write artifacts.
 
 ## 1) Core commands (copy/paste)
 > Use the repo scripts. If a script is missing, **add it** to `package.json` (don’t invent ad-hoc commands).
@@ -19,8 +19,10 @@ Node / Next.js:
 - E2E: `npm run test:e2e`
 
 Python worker:
-- Install deps: `pip install -r services/docling_worker/requirements.txt`
-- Tests: `python -m pytest -q`
+  - Install deps: `cd services/docling_worker` then `uv sync --locked --group test`
+  - Note: `--locked` keeps the venv aligned with `uv.lock` and prevents dependency drift.
+  - If `uv` is not recognized, use `python -m uv sync --locked --group test` and `python -m uv run pytest -q`.
+  - Tests: `cd services/docling_worker` then `uv run pytest -q`
 
 ## 2) Repo map (where things go)
 - Next.js app + route handlers: `app/` (and/or `src/` if present)
@@ -31,12 +33,12 @@ Python worker:
 
 ## 3) Tech Stack
 
-> Keep this section accurate. Prefer **pinning versions** in the repo (e.g., `.nvmrc`, `package.json#engines`, `.python-version`, `requirements.txt`) and update this list when they change.
+> Keep this section accurate. Prefer **pinning versions** in the repo (e.g., `.nvmrc`, `package.json#engines`, `.python-version`, `uv.lock`) and update this list when they change.
 
 ### Application
 - **Frontend/UI:** Next.js (App Router) + React + TypeScript
 - **Server/API:** Next.js Route Handlers (Node runtime)
-- **Doc processing worker:** Python CLI worker using **Docling**
+- **Doc processing worker:** Python CLI worker using **Docling** + **PyMuPDF** engines
 - **Storage:** Local filesystem under `DATA_DIR` (`data/uploads/`, `data/exports/<id>/`)
 
 ### Config & contracts
@@ -85,6 +87,13 @@ Python worker:
 ### meta.json is the contract
 - `meta.json` is written **always** (SUCCESS or FAILED).
 - The UI must render status, metrics, and gate results **from meta.json**.
+
+### Engines
+- Docling (default)
+- PyMuPDF4LLM (layout-only; requires `pymupdf-layout`)
+- `pymupdf4llm.show_progress` (console tqdm) stays disabled to keep worker stdout JSONL-only.
+- UI progress still updates because the worker emits per-page `emit_progress(...)` events.
+- Do not enable any library progress output to stdout; it can break JSON parsing.
 
 ## 6) Per-document artifacts
 For each ingested document `id`:
